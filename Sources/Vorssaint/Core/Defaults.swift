@@ -1531,7 +1531,7 @@ enum Defaults {
         DefaultsKey.panelControlCutPaste: true,
         DefaultsKey.panelControlAutoQuit: true,
         DefaultsKey.panelControlShelf: true,
-        DefaultsKey.menuBarHiderEnabled: true,
+        DefaultsKey.menuBarHiderEnabled: false,
         DefaultsKey.menuBarHiderCollapsed: false,
         DefaultsKey.menuBarHiderAlwaysHiddenEnabled: true,
         DefaultsKey.menuBarHiderAutoCollapse: false,
