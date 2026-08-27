@@ -58,6 +58,7 @@ struct MenuBarHiderStrings {
 extension FeatureStrings {
     static func menuBarHider(_ language: AppLanguage) -> MenuBarHiderStrings {
         switch language {
+        case .sk, .uk: return .enUS
         case .enUS: return .enUS
         case .ptBR: return .ptBR
         case .tr: return .tr
