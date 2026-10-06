@@ -58,6 +58,16 @@ enum NotchScreenEdgeClickTests {
     }
 
     static func run(_ suite: TestSuite) {
+        let protected = Service()
+        protected.geometry = NotchGeometry(screen: protected.geometry.screen, safeAreaTop: 38,
+                                           cameraWidth: 180, reserveMenuBar: true)
+        protected.syncScreenEdgeClicks()
+        let menuPoint = CGPoint(x: protected.geometry.screen.midX, y: protected.geometry.screen.maxY - 10)
+        protected.handleScreenEdgeClick(.leftMouseDown, at: menuPoint, isNotchWindow: false)
+        protected.handleScreenEdgeClick(.leftMouseUp, at: menuPoint, isNotchWindow: false)
+        suite.expect(protected.screenEdgeClickArea == nil && protected.screenEdgeClickMonitors.isEmpty
+                     && protected.openings == 0,
+                     "the protected island installs no edge monitors and ignores menu bar clicks")
         for screen in [CGRect(x: 0, y: 0, width: 1470, height: 956),
                        CGRect(x: -1920, y: 956, width: 1920, height: 1080)] {
             for localDelivery in [false, true] {

@@ -80,6 +80,7 @@ enum NotchMirrorContract {
         }
         var expanded = false, peeking = false, canFollowPointer = true
         var hidesUntilHover = false, coversMenus = true, showsInCaptures = true
+        var reservesMenuBar = false
         var outlineEnabled = false, hidesInFullscreen = false
         let openTitle = "Open"
         var opened = 0, collapses = 0, countdownOpenings = 0
@@ -193,6 +194,11 @@ enum NotchMirrorContract {
         service.syncMirrors()
         suite.expect(service.mirrors[2]?.model.shown == false,
                      "a capsule never covers menus it cannot measure on another display")
+        service.reservesMenuBar = true
+        service.syncMirrors()
+        suite.expect(service.mirrors[2]?.model.shown == true,
+                     "a protected copy can remain visible below another display's unmeasured menu bar")
+        service.reservesMenuBar = false
         service.displayID = 2
         service.syncMirrors()
         suite.expect(service.mirrors[1]?.model.shown == true && service.mirrors[1]?.model.geometry.compactSideRoom == nil,

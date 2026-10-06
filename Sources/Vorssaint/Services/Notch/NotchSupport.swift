@@ -110,7 +110,7 @@ enum NotchDisplay: String, CaseIterable {
 
 /// How the island meets the top of a display without a camera housing: a
 /// capsule floating in the menu bar, as on the phone, or a cutout hanging
-/// from the top edge. A physical camera always keeps the cutout it covers.
+/// from the top edge. Menu bar protection temporarily uses a detached capsule.
 enum NotchSilhouette: String, CaseIterable {
     case capsule, notch
 
@@ -1460,6 +1460,13 @@ enum NotchSupport {
         defaults.object(forKey: DefaultsKey.notchCoversMenus) as? Bool ?? true
     }
 
+    /// A hider can place the system overflow control beneath the island.
+    /// Reserve the entire bar instead of trusting status-item window frames.
+    static func reservesMenuBar(in defaults: UserDefaults = .standard) -> Bool {
+        AppFeature.menuBarHider.isAvailable(in: defaults)
+            && defaults.bool(forKey: DefaultsKey.menuBarHiderEnabled)
+    }
+
     /// The closed island stays out of sight until the pointer reaches it, and
     /// shows no notices while it waits.
     static func hidesUntilHover(in defaults: UserDefaults = .standard) -> Bool {
@@ -1682,8 +1689,9 @@ struct NotchGeometry: Equatable {
     /// Nil hangs the island from the top edge. A capsule floats this far
     /// inside the menu bar, above and below its strips.
     let floatingGap: CGFloat?
-    /// How far a fitted capsule sits below the top of the display, open or closed.
+    /// How far a fitted or menu-bar-protected capsule sits below the screen top.
     let floatingDrop: CGFloat
+    private let reservedMenuBarHeight: CGFloat
     /// How far past a physical camera an outlined island reaches on each side
     /// and below. The line is drawn inside the island's edge, so an island
     /// that only covers the camera would hide it behind the housing.
@@ -1703,23 +1711,27 @@ struct NotchGeometry: Equatable {
          menuBarHeight: CGFloat = 24, compactSideRoom: CGFloat? = nil,
          customWidth: Double = NotchSize.defaultWidth, customHeight: Double = NotchSize.defaultHeight,
          cameraFit: NotchCameraFit = .zero, silhouette: NotchSilhouette = .notch, capsuleFit: NotchCapsuleFit = .zero,
-         outline: Bool = false, barEdge: CGFloat = 0) {
+         outline: Bool = false, barEdge: CGFloat = 0, reserveMenuBar: Bool = false) {
         self.screen = screen
         self.layout = layout
         self.customWidth = NotchSize.clamped(customWidth, to: NotchSize.widthRange, fallback: NotchSize.defaultWidth)
         self.customHeight = NotchSize.clamped(customHeight, to: NotchSize.heightRange, fallback: NotchSize.defaultHeight)
-        let barHeight = menuBarHeight.isFinite ? min(64, max(16, menuBarHeight)) : 24
-        isNotched = safeAreaTop.isFinite && safeAreaTop > 0 && cameraWidth.isFinite && cameraWidth > 0
+        let measuredBar = menuBarHeight.isFinite ? min(64, max(16, menuBarHeight)) : 24
+        let cameraTop = safeAreaTop.isFinite ? min(64, max(0, safeAreaTop)) : 0
+        let barHeight = reserveMenuBar ? max(measuredBar, cameraTop) : measuredBar
+        isNotched = !reserveMenuBar && safeAreaTop.isFinite && safeAreaTop > 0 && cameraWidth.isFinite && cameraWidth > 0
         // Only a physical camera has an outline to match; a simulated one follows the bar.
         let fit = isNotched ? cameraFit : .zero
-        // A capsule replaces only a simulated cutout. It is as wide as the
+        // A capsule replaces a simulated cutout, or moves below the menu bar
+        // while the hider needs unobstructed controls. It is as wide as the
         // cutout of the bar it sits in with its usual margins, so a bar hidden
         // on one display and shown on another draws the same capsule on both.
-        let gap: CGFloat? = !isNotched && silhouette == .capsule ? NotchLayout.capsuleGap(barHeight: barHeight) : nil
+        let gap: CGFloat? = !isNotched && (silhouette == .capsule || reserveMenuBar) ? NotchLayout.capsuleGap(barHeight: barHeight) : nil
         floatingGap = gap
         // A fitted capsule grows from its top edge, keeping its margins.
         let capsuleFit = gap == nil ? NotchCapsuleFit.zero : capsuleFit
-        floatingDrop = capsuleFit.drop
+        reservedMenuBarHeight = reserveMenuBar ? barHeight + 2 : 0
+        floatingDrop = max(capsuleFit.drop, reservedMenuBarHeight)
         capsuleWidthFit = capsuleFit.width
         // The bar ends in a hairline, `barEdge` thick, that reads as its edge:
         // the capsule's margin below is measured from it, as the one above is
@@ -2036,7 +2048,7 @@ struct NotchGeometry: Equatable {
     }
     func notificationPreviewSize(contentHeight: CGFloat) -> CGSize {
         let height = safeContentTop + max(0, contentHeight) + NotchLayout.bottomInset
-        return CGSize(width: notificationPreviewWidth, height: min(height, screen.height - 48))
+        return CGSize(width: notificationPreviewWidth, height: min(height, screen.height - 48 - reservedMenuBarHeight))
     }
     var peek: CGSize {
         CGSize(width: min(screen.width - 24, max(cameraWidth + 110, 340)), height: safeContentTop + 52)
@@ -2140,7 +2152,7 @@ struct NotchGeometry: Equatable {
         var preferredHeight = headerTopInset + headerChromeHeight + contentHeight
         if layout == .custom { preferredHeight = min(preferredHeight, customHeight) }
         return CGSize(width: expandedWidth,
-                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset))
+                      height: min(preferredHeight, screen.height - 48 - quickAccessBottomInset - reservedMenuBarHeight))
     }
 
     /// Leave room for the row indicator without narrowing the tiles below
@@ -2162,7 +2174,7 @@ struct NotchGeometry: Equatable {
         let content = min(pageBudget, count == 0 ? NotchLayout.emptyHeight
             : NotchLayout.railHeight(rows: sectionRows(count: count), rowHeight: NotchLayout.sectionTileHeight, spacing: NotchLayout.sectionSpacing))
         let desiredHeight = headerTopInset + headerChromeHeight + content
-        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset))
+        return CGSize(width: expandedWidth, height: min(desiredHeight, screen.height - 48 - quickAccessBottomInset - reservedMenuBarHeight))
     }
 
     func contentSize(for size: CGSize) -> CGSize {

@@ -109,6 +109,7 @@ enum NotchScreenRefreshContract {
         var mascotWantsRoom = false
         var accessibilityGranted = true
         var coversMenus = false
+        var reservesMenuBar = false
         var menuSpaceTimer: Timer?
         var menuSpaceGeneration = 0
         var screenRefreshWork: DispatchWorkItem?
@@ -383,6 +384,12 @@ enum NotchScreenRefreshContract {
         covering.syncMenuSpaceMonitoring()
         suite.expect(covering.menuSpaceTimer != nil && covering.reads == 1,
                "giving way to the menus again resumes the existing reader")
+        covering.reservesMenuBar = true
+        covering.accessibilityGranted = false
+        covering.syncMenuSpaceMonitoring()
+        suite.expect(covering.menuSpaceTimer == nil && covering.reads == 1
+                     && covering.geometry.compactSideRoom == emptyBar,
+                     "an island below the protected bar needs neither Accessibility nor menu polling")
 
         let idleSimulated = Service()
         idleSimulated.geometry = NotchGeometry(screen: CGRect(x: 0, y: 0, width: 1440, height: 900),

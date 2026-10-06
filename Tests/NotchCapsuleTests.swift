@@ -22,6 +22,45 @@ enum NotchCapsuleTests {
         targetContracts(suite)
         fitContracts(suite)
         symbolContracts(suite)
+        menuBarProtectionContracts(suite)
+    }
+
+    private static func menuBarProtectionContracts(_ suite: TestSuite) {
+        let domain = "com.vorssaint.tests.notch-menu-bar.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        for installed in [false, true] {
+            for enabled in [false, true] {
+                defaults.set(installed, forKey: AppFeature.menuBarHider.availabilityKey)
+                defaults.set(enabled, forKey: DefaultsKey.menuBarHiderEnabled)
+                suite.expect(NotchSupport.reservesMenuBar(in: defaults) == (installed && enabled),
+                             "menu bar protection requires an installed and enabled hider")
+            }
+        }
+        for safeArea: CGFloat in [0, 38] {
+            for bar: CGFloat in [24, 38] {
+                let geometry = NotchGeometry(screen: screen, safeAreaTop: safeArea, cameraWidth: 185,
+                                             menuBarHeight: bar, silhouette: .notch, reserveMenuBar: true)
+                let band = CGRect(x: screen.minX, y: screen.maxY - max(safeArea, bar),
+                                  width: screen.width, height: max(safeArea, bar))
+                suite.expect(geometry.floats && !geometry.isNotched,
+                             "protected presentation uses a detached capsule even on a camera display")
+                for size in [geometry.restingSize(showsContent: false),
+                             geometry.compactActivitySize, geometry.expandedSize(module: .tools, panel: true)] {
+                    let frame = geometry.frame(for: size)
+                    suite.expect(!frame.intersects(band) && frame.maxY <= band.minY - 2,
+                                 "closed, activity and expanded islands leave the full menu bar accessible")
+                    suite.expect(frame.minY >= screen.minY,
+                                 "the protected island stays within the display height")
+                    suite.expect(geometry.contains(CGPoint(x: frame.midX, y: frame.midY), in: size),
+                                 "interaction geometry follows the protected placement")
+                }
+                let restored = NotchGeometry(screen: screen, safeAreaTop: safeArea, cameraWidth: 185,
+                                             menuBarHeight: bar, silhouette: .notch)
+                suite.expect(restored.frame(for: CGSize(width: 300, height: 100)).maxY == screen.maxY,
+                             "removing protection restores the original top-edge presentation")
+            }
+        }
     }
 
     private static let screen = CGRect(x: -1920, y: -100, width: 1920, height: 1080)

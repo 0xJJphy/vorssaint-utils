@@ -2680,7 +2680,7 @@ final class NotchService: ObservableObject {
     /// the island may, or where there are none, and otherwise gives way.
     private func mirrorSideRoom(on screen: NSScreen, geometry: NotchGeometry) -> CGFloat? {
         let hasMenuBar = NSScreen.screensHaveSeparateSpaces || NSScreen.withMenuBar == screen
-        guard NotchSupport.coversMenus() || !hasMenuBar else { return nil }
+        guard NotchSupport.reservesMenuBar() || NotchSupport.coversMenus() || !hasMenuBar else { return nil }
         return NotchMenuBarLayout.sideRoom(screen: geometry.screen, cameraWidth: geometry.cameraWidth,
                                            barHeight: geometry.menuBarHeight, occupied: [])
     }
@@ -2731,6 +2731,9 @@ final class NotchService: ObservableObject {
         guard running, !suspended, !expanded, captureControls == nil, notice == nil,
               !dragPlaceholder, !heldDrag, let panel, panel.isVisible, !panel.ignoresMouseEvents else { return nil }
         let geometry = compactActivityIsVisible ? compactActivityGeometry : self.geometry
+        // A detached island below the bar receives clicks in its own window.
+        // It must not monitor or react to clicks on menu bar controls above it.
+        guard geometry.floatingDrop < geometry.menuBarHeight else { return nil }
         let area = geometry.activationArea(in: surfaceSize, hasHeader: peeking, compactActivity: compactActivityIsVisible)
         guard !area.isEmpty else { return nil }
         let frame = geometry.frame(for: surfaceSize)
@@ -2819,7 +2822,7 @@ final class NotchService: ObservableObject {
         // can change just because focus moves to another app or display.
         // A display without a menu bar, beside the main one when displays
         // share Spaces, has no menus to leave room for either.
-        if running, !suspended, NotchSupport.coversMenus() || !displayHasMenuBar {
+        if running, !suspended, NotchSupport.reservesMenuBar() || NotchSupport.coversMenus() || !displayHasMenuBar {
             // Nothing to measure: the island keeps the room an empty bar
             // would leave it, over whatever menus and status items are there.
             stopMenuSpaceMonitoring()
@@ -3014,7 +3017,8 @@ final class NotchService: ObservableObject {
                              cameraFit: NotchCameraFit.current(), silhouette: NotchSilhouette.current(),
                              capsuleFit: NotchCapsuleFit.current(),
                              outline: UserDefaults.standard.bool(forKey: DefaultsKey.notchOutlineEnabled),
-                             barEdge: 1 / max(1, screen.backingScaleFactor))
+                             barEdge: 1 / max(1, screen.backingScaleFactor),
+                             reserveMenuBar: NotchSupport.reservesMenuBar())
     }
 
     private func updateFullscreenVisibility(displayID: CGDirectDisplayID) {
