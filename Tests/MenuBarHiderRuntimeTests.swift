@@ -239,6 +239,26 @@ enum MenuBarHiderRuntimeTests {
         clicks.repairSeparatorOrder()
         suite.expect(!clicks.separatorRolesSwapped && clicks.separatorItem === leftSlot,
                      "dragging the separators back exchanges their roles again")
+        let normalPositionKey = "NSStatusItem Preferred Position \(MenuBarHiderSupport.separatorAutosaveName)"
+        let permanentPositionKey = "NSStatusItem Preferred Position \(MenuBarHiderSupport.alwaysHiddenAutosaveName)"
+        defaults.set(651.0, forKey: normalPositionKey)
+        defaults.set(357.0, forKey: permanentPositionKey)
+        clicks.isShowingAll = false
+        leftSlot.visibleX = nil
+        rightSlot.visibleX = nil
+        clicks.repairSeparatorOrder()
+        suite.expect(clicks.separatorRolesSwapped && clicks.separatorItem === rightSlot,
+                     "remembered crossed placement repairs roles while the permanent section is hidden")
+        let repairedAppearances = clicks.appearances
+        clicks.repairSeparatorOrder()
+        suite.expect(clicks.appearances == repairedAppearances,
+                     "role persistence notification cannot create a repair loop")
+        defaults.set(250.0, forKey: normalPositionKey)
+        clicks.repairSeparatorOrder()
+        suite.expect(!clicks.separatorRolesSwapped && clicks.separatorItem === leftSlot,
+                     "a second drag restores roles without requiring Show All")
+        defaults.removeObject(forKey: normalPositionKey)
+        defaults.removeObject(forKey: permanentPositionKey)
         clicks.autoCollapseTimer?.invalidate()
         host.autoCollapseIfCurrent(generation: nextGeneration)
         suite.expect(host.isShowingAll && host.recoveryHoldsExpansion,

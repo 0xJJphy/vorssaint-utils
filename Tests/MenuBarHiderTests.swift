@@ -29,6 +29,26 @@ enum MenuBarHiderTests {
         suite.expect(MenuBarHiderSupport.statusWindowID(42) == 42,
                      "valid window identifiers remain queryable")
 
+        let normalPositionKey = "NSStatusItem Preferred Position \(MenuBarHiderSupport.separatorAutosaveName)"
+        let permanentPositionKey = "NSStatusItem Preferred Position \(MenuBarHiderSupport.alwaysHiddenAutosaveName)"
+        suite.expect(MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: defaults) == nil,
+                     "missing positions do not invent a separator order")
+        defaults.set(651.0, forKey: normalPositionKey)
+        defaults.set(357.0, forKey: permanentPositionKey)
+        suite.expect(MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: defaults) == true,
+                     "the reported crossed placement is recognized even when windows are hidden")
+        defaults.set(300.0, forKey: normalPositionKey)
+        suite.expect(MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: defaults) == false,
+                     "moving the normal slot right of the permanent slot restores its role")
+        defaults.set(357.0, forKey: normalPositionKey)
+        suite.expect(MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: defaults) == nil,
+                     "equal remembered positions cannot produce oscillating role assignments")
+        defaults.set(-1.0, forKey: normalPositionKey)
+        suite.expect(MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: defaults) == nil,
+                     "invalid remembered positions do not hide a separator")
+        defaults.removeObject(forKey: normalPositionKey)
+        defaults.removeObject(forKey: permanentPositionKey)
+
         // MARK: Menu Bar Hider calculations and localization
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(5) == 5, "auto-collapse delay 5 is valid")
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(30) == 30, "auto-collapse delay 30 is valid")

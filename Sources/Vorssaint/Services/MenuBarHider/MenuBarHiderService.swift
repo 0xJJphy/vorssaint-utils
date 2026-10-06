@@ -53,6 +53,10 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         }
 
         NotificationCenter.default.addObserver(
+            self, selector: #selector(statusItemPlacementChanged),
+            name: UserDefaults.didChangeNotification, object: UserDefaults.standard
+        )
+        NotificationCenter.default.addObserver(
             self,
             selector: #selector(screenParametersChanged),
             name: NSApplication.didChangeScreenParametersNotification,
@@ -178,6 +182,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             isShowingAll = false
         }
 
+        repairSeparatorOrder()
         configureItemButtons()
         updateItemAppearances()
     }
@@ -207,8 +212,22 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         localSeparatorDragMonitor = nil
     }
 
+    @objc private func statusItemPlacementChanged() {
+        // Preference notifications may arrive outside the main thread. Do not
+        // touch AppKit there, and do not install an idle polling timer.
+        DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
+    }
+
     private func repairSeparatorOrder() {
-        guard isEnabled, isShowingAll,
+        guard isEnabled, physicalSeparatorItem != nil, physicalAlwaysHiddenItem != nil else { return }
+        if let swapped = MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: UserDefaults.standard) {
+            guard swapped != separatorRolesSwapped else { return }
+            separatorRolesSwapped = swapped
+            UserDefaults.standard.set(swapped, forKey: Self.swappedRolesKey)
+            updateItemAppearances()
+            return
+        }
+        guard isShowingAll,
               let normal = separatorItem, let permanent = alwaysHiddenItem,
               let normalX = visibleStatusItemX(normal),
               let permanentX = visibleStatusItemX(permanent), normalX < permanentX else { return }

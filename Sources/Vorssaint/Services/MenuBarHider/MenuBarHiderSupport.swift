@@ -42,6 +42,21 @@ enum MenuBarHiderSupport {
         return CGWindowID(exactly: windowNumber)
     }
 
+    /// AppKit remembers placement as distance from the right edge. Unlike
+    /// status window numbers, this remains available when an item is hidden.
+    static func preferredSeparatorRolesSwapped(in defaults: UserDefaults) -> Bool? {
+        let normalKey = "NSStatusItem Preferred Position \(separatorAutosaveName)"
+        let permanentKey = "NSStatusItem Preferred Position \(alwaysHiddenAutosaveName)"
+        guard let normal = defaults.object(forKey: normalKey) as? NSNumber,
+              let permanent = defaults.object(forKey: permanentKey) as? NSNumber else { return nil }
+        let normalPosition = normal.doubleValue
+        let permanentPosition = permanent.doubleValue
+        guard normalPosition.isFinite, permanentPosition.isFinite,
+              normalPosition >= 0, permanentPosition >= 0,
+              normalPosition != permanentPosition else { return nil }
+        return normalPosition > permanentPosition
+    }
+
     static let defaultToggleWidth: Double = 24.0
     static let normalSeparatorWidth: Double = 10.0
     static let normalAlwaysHiddenWidth: Double = 12.0
