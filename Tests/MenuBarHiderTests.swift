@@ -100,8 +100,16 @@ enum MenuBarHiderTests {
             }
         }
 
-        let testOrder = MenuBarHiderSupport.sortedRoles(positions: [("toggle", 1200.0), ("alwaysHidden", 800.0), ("separator", 1000.0)])
-        suite.expect(testOrder == ["alwaysHidden", "separator", "toggle"], "items are sorted left-to-right by horizontal position")
+        let screens = [CGRect(x: 0, y: 0, width: 1512, height: 982),
+                       CGRect(x: -1920, y: 250, width: 1920, height: 1080)]
+        suite.expect(MenuBarHiderSupport.pointerIsOnMenuBar(CGPoint(x: 100, y: 970), screenFrames: screens, barHeight: 24),
+                     "hover stays open while reaching another icon on the main menu bar")
+        suite.expect(MenuBarHiderSupport.pointerIsOnMenuBar(CGPoint(x: -100, y: 1320), screenFrames: screens, barHeight: 24),
+                     "hover recognizes an offset external display menu bar")
+        suite.expect(!MenuBarHiderSupport.pointerIsOnMenuBar(CGPoint(x: 100, y: 900), screenFrames: screens, barHeight: 24),
+                     "leaving the menu bar allows hover collapse")
+        suite.expect(!MenuBarHiderSupport.pointerIsOnMenuBar(CGPoint(x: 1600, y: 970), screenFrames: screens, barHeight: 24),
+                     "a point outside all displays does not hold hover open")
 
 
         for lang in AppLanguage.allCases {

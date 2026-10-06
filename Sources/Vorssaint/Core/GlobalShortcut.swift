@@ -915,7 +915,7 @@ enum GlobalShortcutRole: CaseIterable, Identifiable {
         case .keyboardBrightnessDecrease, .keyboardBrightnessIncrease:
             return [DefaultsKey.keyboardBrightnessShortcutsEnabled]
         case .pointerNextDisplay: return [DefaultsKey.pointerDisplayEnabled]
-        case .menuBarHider: return [DefaultsKey.menuBarHiderShortcutEnabled]
+        case .menuBarHider: return [DefaultsKey.menuBarHiderEnabled, DefaultsKey.menuBarHiderShortcutEnabled]
         }
     }
 

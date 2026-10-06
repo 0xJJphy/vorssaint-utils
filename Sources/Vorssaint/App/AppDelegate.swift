@@ -404,8 +404,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
             .joined(separator: ",")
         let visible = statusController?.statusItem.isVisible ?? false
         let manager = Self.runningMenuBarManagerName() ?? "none"
-        let hider = MenuBarHiderService.shared
-        let hiderState = hider.isEnabled ? (hider.isCollapsed ? "collapsed" : "expanded") : "off"
+        let hiderState: String
+        if AppFeature.menuBarHider.isAvailable {
+            let hider = MenuBarHiderService.shared
+            hiderState = hider.isEnabled ? (hider.isCollapsed ? "collapsed" : "expanded") : "off"
+        } else {
+            hiderState = "off"
+        }
         Self.menuBarLog.log("reshow \(stage, privacy: .public) window=\(window != nil) frame=\(placement, privacy: .public) visible=\(visible) screens=\(screens, privacy: .public) organizer=\(manager, privacy: .public) hider=\(hiderState, privacy: .public)")
     }
 
@@ -1828,7 +1833,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelegate, NSW
         guard !isReshowingStatusItem else { return }
         isReshowingStatusItem = true
         if AppFeature.menuBarHider.isAvailable {
-            MenuBarHiderService.shared.expand(startTimer: false)
+            MenuBarHiderService.shared.revealForStatusItemRecovery()
         }
         statusController?.recreateStatusItem()
         verifyIconReappeared(attemptsLeft: Self.reshowVerifyAttempts)

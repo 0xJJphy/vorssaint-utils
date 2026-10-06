@@ -1,0 +1,172 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+// Copyright (C) 2026 Vorssaint
+
+import AppKit
+
+/// Exercises production lifecycle methods with isolated preferences and no
+/// status items or global shortcuts installed in the user's session.
+enum MenuBarHiderRuntimeTests {
+    final class Item {}
+    enum NSStatusBar {
+        static let system = Bar()
+        final class Bar {
+            var removed = 0
+            func removeStatusItem(_ item: Item) { removed += 1 }
+        }
+    }
+    final class Hotkey {
+        var registered = false
+        var acceptsRegistration = true
+        var unregisters = 0
+        func sync(enabled: Bool, shortcut: GlobalShortcut, storageKey: String) -> Bool {
+            registered = enabled && acceptsRegistration
+            return !enabled || acceptsRegistration
+        }
+        func unregister() { registered = false; unregisters += 1 }
+    }
+    class Fixture {
+        let defaults: UserDefaults
+        let hotkey = Hotkey()
+        var isEnabled = false
+        var isCollapsed = false
+        var isShowingAll = false
+        var isConfiguring = false
+        var shortcutRegistrationFailed = false
+        var shortcutConflict: GlobalShortcutRole?
+        var autoCollapseTimer: Timer?
+        var autoCollapseGeneration: UInt64 = 0
+        var recoveryHoldsExpansion = false
+        var didExpandFromHover = false
+        var toggleItem: Item?
+        var separatorItem: Item?
+        var alwaysHiddenItem: Item?
+        var hoverWatchdogActive = false
+        var trackingActive = false
+        var scrollActive = false
+        var installs = 0
+        var appearances = 0
+        var haptics = 0
+
+        init(defaults: UserDefaults) { self.defaults = defaults }
+        func installOrUpdateItems() {
+            installs += 1
+            toggleItem = toggleItem ?? Item()
+            separatorItem = separatorItem ?? Item()
+            alwaysHiddenItem = alwaysHiddenItem ?? Item()
+            trackingActive = true
+        }
+        func setupScrollMonitor() { scrollActive = true }
+        func stopHoverWatchdog() { hoverWatchdogActive = false }
+        func removeTrackingArea() { trackingActive = false }
+        func removeScrollMonitor() { scrollActive = false }
+        func updateItemAppearances() { appearances += 1 }
+        func triggerHapticFeedback() { haptics += 1 }
+    }
+
+    static func run(_ suite: TestSuite) {
+        let domain = "com.vorssaint.tests.menu-bar-hider-runtime.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        defaults.setPersistentDomain(Defaults.registeredDefaults.filter { $0.key.hasPrefix("menuBarHider") },
+                                     forName: domain)
+        defaults.set(true, forKey: AppFeature.menuBarHider.availabilityKey)
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderShortcutEnabled)
+        let host = Host(defaults: defaults)
+        host.syncWithPreferences()
+        suite.expect(!host.hotkey.registered && host.installs == 0,
+                     "a disabled but installed hider never claims its enabled shortcut")
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderEnabled)
+        host.syncWithPreferences()
+        suite.expect(host.hotkey.registered && host.toggleItem != nil && host.scrollActive,
+                     "enabling installs controls and registers the shortcut")
+        defaults.set(false, forKey: DefaultsKey.menuBarHiderEnabled)
+        host.hoverWatchdogActive = true
+        host.syncWithPreferences()
+        suite.expect(!host.hotkey.registered && host.toggleItem == nil && host.separatorItem == nil
+                     && host.alwaysHiddenItem == nil && !host.scrollActive && !host.trackingActive
+                     && !host.hoverWatchdogActive && host.autoCollapseTimer == nil,
+                     "disabling tears down the shortcut, items, timers and event monitors")
+        let appearances = host.appearances
+        let haptics = host.haptics
+        host.toggle()
+        host.expand()
+        host.collapse()
+        host.showAll()
+        host.beginConfigurationMode()
+        host.resetSeparatorPositions()
+        host.revealForStatusItemRecovery()
+        suite.expect(host.appearances == appearances && host.haptics == haptics && !host.isConfiguring,
+                     "disabled entry points cannot change state, recreate items or emit haptics")
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderEnabled)
+        host.syncWithPreferences()
+        defaults.set(false, forKey: AppFeature.menuBarHider.availabilityKey)
+        host.syncWithPreferences()
+        suite.expect(!host.hotkey.registered && !host.isEnabled && host.toggleItem == nil,
+                     "uninstall releases the shortcut even when saved switches stay on")
+        defaults.set(true, forKey: AppFeature.menuBarHider.availabilityKey)
+        host.syncWithPreferences()
+        suite.expect(host.isEnabled && host.hotkey.registered,
+                     "reinstall restores saved activation and shortcut preferences")
+
+        host.resetSeparatorPositions()
+        suite.expect(host.isConfiguring && host.hotkey.registered && host.toggleItem != nil,
+                     "resetting placement rebuilds controls without losing the enabled shortcut")
+        host.endConfigurationMode()
+
+        let oldShortcut = GlobalShortcut.recentCapturesDefault
+        defaults.set(oldShortcut.storageValue, forKey: DefaultsKey.menuBarHiderShortcut)
+        defaults.set(true, forKey: AppFeature.screenshot.availabilityKey)
+        host.syncWithPreferences()
+        suite.expect(host.shortcutConflict == .recentCaptures && !host.hotkey.registered,
+                     "the stored former default cannot steal the recent-captures shortcut")
+        suite.expect(defaults.string(forKey: DefaultsKey.menuBarHiderShortcut) == oldShortcut.storageValue,
+                     "conflict reporting preserves the user's saved combination")
+        defaults.set(GlobalShortcut.menuBarHiderDefault.storageValue, forKey: DefaultsKey.menuBarHiderShortcut)
+        host.syncWithPreferences()
+        suite.expect(host.shortcutConflict == nil && host.hotkey.registered,
+                     "assigning a free combination resolves a saved conflict")
+        host.hotkey.acceptsRegistration = false
+        host.syncWithPreferences()
+        suite.expect(host.shortcutRegistrationFailed && !host.hotkey.registered,
+                     "a macOS registration refusal is exposed to Settings")
+        host.hotkey.acceptsRegistration = true
+
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderAutoCollapse)
+        host.expand()
+        let firstGeneration = host.autoCollapseGeneration
+        suite.expect(host.autoCollapseTimer != nil, "expansion arms the configured timer")
+        host.beginConfigurationMode()
+        host.autoCollapseIfCurrent(generation: firstGeneration)
+        suite.expect(host.isConfiguring && !host.isCollapsed && host.autoCollapseTimer == nil,
+                     "an expired callback cannot collapse after configuration starts")
+        host.syncWithPreferences()
+        suite.expect(host.autoCollapseTimer == nil, "preference sync cannot arm a timer while configuring")
+        host.endConfigurationMode()
+        let nextGeneration = host.autoCollapseGeneration
+        suite.expect(host.autoCollapseTimer != nil, "leaving configuration resumes automatic collapse")
+        host.autoCollapseIfCurrent(generation: firstGeneration)
+        suite.expect(!host.isCollapsed, "a replaced timer cannot close a newer expansion")
+        host.autoCollapseIfCurrent(generation: nextGeneration)
+        suite.expect(host.isCollapsed && host.autoCollapseTimer == nil,
+                     "the current timer collapses an active expanded hider")
+
+        host.revealForStatusItemRecovery()
+        host.syncWithPreferences()
+        suite.expect(!host.isCollapsed && host.autoCollapseTimer == nil && host.recoveryHoldsExpansion,
+                     "icon recovery remains expanded across unrelated preference syncs")
+        host.beginConfigurationMode()
+        host.endConfigurationMode()
+        suite.expect(!host.recoveryHoldsExpansion && host.autoCollapseTimer != nil,
+                     "a deliberate configuration session resumes automatic collapse after recovery")
+        let pendingGeneration = host.autoCollapseGeneration
+        defaults.set(false, forKey: DefaultsKey.menuBarHiderEnabled)
+        host.syncWithPreferences()
+        host.autoCollapseIfCurrent(generation: pendingGeneration)
+        suite.expect(!host.isEnabled && !host.isCollapsed,
+                     "an expired callback has no effect after disabling")
+
+        let role = GlobalShortcutRole.menuBarHider
+        suite.expect(role.requiredEnableKeys.contains(DefaultsKey.menuBarHiderEnabled),
+                     "shortcut conflict checks use the same main enable gate as registration")
+    }
+}

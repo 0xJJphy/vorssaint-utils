@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 // Copyright (C) 2026 Vorssaint
 
+import CoreGraphics
 import Foundation
 
 /// Visual style options for the Menu Bar Hider toggle icon.
@@ -138,8 +139,10 @@ enum MenuBarHiderSupport {
         return strings.tooltipCollapse
     }
 
-    /// Sorts status item identifiers or roles by horizontal screen position (left to right).
-    static func sortedRoles<T: Comparable>(positions: [(role: String, x: T)]) -> [String] {
-        positions.sorted { $0.x < $1.x }.map(\.role)
+    static func pointerIsOnMenuBar(_ point: CGPoint, screenFrames: [CGRect], barHeight: CGFloat) -> Bool {
+        screenFrames.contains { frame in
+            point.x >= frame.minX && point.x <= frame.maxX
+                && point.y <= frame.maxY && point.y >= frame.maxY - barHeight
+        }
     }
 }

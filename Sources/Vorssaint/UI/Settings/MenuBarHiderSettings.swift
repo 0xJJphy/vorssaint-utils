@@ -19,6 +19,7 @@ struct MenuBarHiderSettings: View {
     @AppStorage(DefaultsKey.menuBarHiderShortcutEnabled) private var shortcutEnabled = false
 
     @State private var didResetPositions = false
+    @State private var pageIsVisible = false
 
     private var text: MenuBarHiderStrings { FeatureStrings.menuBarHider(l10n.language) }
 
@@ -151,24 +152,38 @@ struct MenuBarHiderSettings: View {
                 ShortcutPreferenceRow(role: .menuBarHider, isEnabled: shortcutEnabled && enabled) {
                     MenuBarHiderService.shared.syncWithPreferences()
                 }
+                if let conflict = service.shortcutConflict {
+                    Text(String(format: l10n.s.shortcutConflictFormat, conflict.title(l10n.s)))
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                } else if service.shortcutRegistrationFailed {
+                    Text(l10n.s.shortcutUnavailable)
+                        .font(.caption)
+                        .foregroundStyle(.orange)
+                }
             }
             .disabled(!enabled)
         }
         .formStyle(.grouped)
         .onAppear {
+            pageIsVisible = true
             if enabled {
                 MenuBarHiderService.shared.beginConfigurationMode()
             }
         }
         .onDisappear {
+            pageIsVisible = false
             MenuBarHiderService.shared.endConfigurationMode()
         }
-        // Belt and braces: configuration mode holds the bar open and suppresses
-        // both collapse timers, and onDisappear is not guaranteed to run when
-        // the Settings window is closed outright. Leaving it latched on stops
-        // the bar ever closing again, so the window going away ends it too.
-        .onReceive(NotificationCenter.default.publisher(for: NSWindow.willCloseNotification)) { _ in
-            MenuBarHiderService.shared.endConfigurationMode()
+        // The retained page does not disappear when Settings closes. Its
+        // own window visibility is already tracked centrally by the app.
+        .onReceive(SettingsWindowVisibility.shared.$isVisible) { visible in
+            guard pageIsVisible else { return }
+            if visible && enabled {
+                MenuBarHiderService.shared.beginConfigurationMode()
+            } else {
+                MenuBarHiderService.shared.endConfigurationMode()
+            }
         }
     }
 
