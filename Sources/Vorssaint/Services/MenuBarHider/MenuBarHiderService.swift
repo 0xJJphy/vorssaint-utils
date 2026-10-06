@@ -54,6 +54,8 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
     deinit {
         NotificationCenter.default.removeObserver(self)
+        autoCollapseTimer?.invalidate()
+        hoverWatchdogTimer?.invalidate()
         removeScrollMonitor()
     }
 
@@ -495,6 +497,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         let timer = Timer(timeInterval: 0.2, repeats: true) { [weak self] _ in
             self?.collapseIfPointerLeftToggle()
         }
+        timer.tolerance = 0.05
         RunLoop.main.add(timer, forMode: .common)
         hoverWatchdogTimer = timer
     }
@@ -535,7 +538,11 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     // MARK: - Scroll to Toggle
 
     private func setupScrollMonitor() {
-        removeScrollMonitor()
+        guard isEnabled, UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderScrollToToggle) else {
+            removeScrollMonitor()
+            return
+        }
+        guard scrollMonitor == nil else { return }
         scrollMonitor = NSEvent.addLocalMonitorForEvents(matching: .scrollWheel) { [weak self] event in
             self?.handleScrollEvent(event)
             return event
@@ -749,6 +756,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         let timer = Timer(timeInterval: Double(delaySeconds), repeats: false) { [weak self] _ in
             self?.autoCollapseIfCurrent(generation: generation)
         }
+        timer.tolerance = min(0.5, Double(delaySeconds) * 0.1)
         RunLoop.main.add(timer, forMode: .common)
         autoCollapseTimer = timer
     }
@@ -768,10 +776,8 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 }
 
-/// Custom subview for separator status items that always renders the separator
-/// symbol ("|" or "‖") pinned to the trailing edge of the item bounds, ensuring
-/// that the separator glyph remains perfectly visible on-screen even when the
-/// status item length is expanded to 10,000px to hide adjacent menu bar icons.
+/// Draws "|" or "‖" at the trailing edge of the separator's local bounds.
+/// Whether the item is on screen depends on the system's menu bar layout.
 final class MenuBarHiderSeparatorView: NSView {
     var symbol: String = "|" {
         didSet { if oldValue != symbol { needsDisplay = true } }

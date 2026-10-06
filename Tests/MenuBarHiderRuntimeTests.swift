@@ -7,6 +7,15 @@ import AppKit
 /// status items or global shortcuts installed in the user's session.
 enum MenuBarHiderRuntimeTests {
     final class Item {}
+    enum NSEvent {
+        enum EventMask { case scrollWheel }
+        static var registrations = 0
+        static func addLocalMonitorForEvents(matching: EventMask,
+                                            handler: @escaping (AppKit.NSEvent) -> AppKit.NSEvent?) -> Any? {
+            registrations += 1
+            return NSObject()
+        }
+    }
     enum NSStatusBar {
         static let system = Bar()
         final class Bar {
@@ -42,7 +51,8 @@ enum MenuBarHiderRuntimeTests {
         var alwaysHiddenItem: Item?
         var hoverWatchdogActive = false
         var trackingActive = false
-        var scrollActive = false
+        var scrollMonitor: Any?
+        var scrollActive: Bool { scrollMonitor != nil }
         var installs = 0
         var appearances = 0
         var haptics = 0
@@ -55,10 +65,10 @@ enum MenuBarHiderRuntimeTests {
             alwaysHiddenItem = alwaysHiddenItem ?? Item()
             trackingActive = true
         }
-        func setupScrollMonitor() { scrollActive = true }
+        func handleScrollEvent(_ event: AppKit.NSEvent) {}
         func stopHoverWatchdog() { hoverWatchdogActive = false }
         func removeTrackingArea() { trackingActive = false }
-        func removeScrollMonitor() { scrollActive = false }
+        func removeScrollMonitor() { scrollMonitor = nil }
         func updateItemAppearances() { appearances += 1 }
         func triggerHapticFeedback() { haptics += 1 }
     }
@@ -76,9 +86,22 @@ enum MenuBarHiderRuntimeTests {
         suite.expect(!host.hotkey.registered && host.installs == 0,
                      "a disabled but installed hider never claims its enabled shortcut")
         defaults.set(true, forKey: DefaultsKey.menuBarHiderEnabled)
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderScrollToToggle)
         host.syncWithPreferences()
         suite.expect(host.hotkey.registered && host.toggleItem != nil && host.scrollActive,
                      "enabling installs controls and registers the shortcut")
+        let registrations = NSEvent.registrations
+        host.syncWithPreferences()
+        suite.expect(NSEvent.registrations == registrations,
+                     "preference sync reuses the existing scroll monitor")
+        defaults.set(false, forKey: DefaultsKey.menuBarHiderScrollToToggle)
+        host.syncWithPreferences()
+        suite.expect(!host.scrollActive && NSEvent.registrations == registrations,
+                     "disabling scroll removes the monitor without creating another")
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderScrollToToggle)
+        host.syncWithPreferences()
+        suite.expect(host.scrollActive && NSEvent.registrations == registrations + 1,
+                     "re-enabling scroll installs exactly one monitor")
         defaults.set(false, forKey: DefaultsKey.menuBarHiderEnabled)
         host.hoverWatchdogActive = true
         host.syncWithPreferences()
