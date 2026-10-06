@@ -58,6 +58,11 @@ struct MenuBarHiderSettings: View {
                 }
                 .padding(.vertical, 4)
 
+                Button(text.contextMenuShowAll) {
+                    MenuBarHiderService.shared.revealForStatusItemRecovery()
+                }
+                .disabled(!enabled)
+
                 Button(action: triggerResetPositions) {
                     HStack(spacing: 6) {
                         Image(systemName: didResetPositions ? "checkmark.circle.fill" : "arrow.counterclockwise")

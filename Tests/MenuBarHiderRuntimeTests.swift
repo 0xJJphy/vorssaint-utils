@@ -175,8 +175,21 @@ enum MenuBarHiderRuntimeTests {
 
         host.revealForStatusItemRecovery()
         host.syncWithPreferences()
-        suite.expect(!host.isCollapsed && host.autoCollapseTimer == nil && host.recoveryHoldsExpansion,
-                     "icon recovery remains expanded across unrelated preference syncs")
+        suite.expect(!host.isCollapsed && host.isShowingAll && host.autoCollapseTimer == nil && host.recoveryHoldsExpansion,
+                     "icon recovery reveals even always-hidden controls across preference syncs")
+        host.autoCollapseIfCurrent(generation: nextGeneration)
+        suite.expect(host.isShowingAll && host.recoveryHoldsExpansion,
+                     "a stale callback cannot hide the only recovery control again")
+        host.isConfiguring = true
+        host.endConfigurationMode()
+        suite.expect(host.isShowingAll && host.autoCollapseTimer == nil,
+                     "closing Settings after explicit recovery leaves every section revealed")
+        for _ in 0..<10 {
+            host.revealForStatusItemRecovery()
+            host.syncWithPreferences()
+        }
+        suite.expect(host.isShowingAll && host.autoCollapseTimer == nil,
+                     "repeated recovery never starts a reveal-collapse timer loop")
         host.beginConfigurationMode()
         host.endConfigurationMode()
         suite.expect(!host.recoveryHoldsExpansion && host.autoCollapseTimer != nil,

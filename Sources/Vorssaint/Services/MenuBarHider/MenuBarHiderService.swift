@@ -367,7 +367,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     /// toggle or configuration session, including intervening preference syncs.
     func revealForStatusItemRecovery() {
         guard isEnabled else { return }
-        expand(startTimer: false)
+        showAll(startTimer: false)
         recoveryHoldsExpansion = true
     }
 
