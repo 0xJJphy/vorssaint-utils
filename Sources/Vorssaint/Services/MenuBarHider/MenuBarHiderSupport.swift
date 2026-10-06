@@ -35,6 +35,13 @@ enum MenuBarHiderSupport {
     static let separatorAutosaveName = "VorssaintMenuBarHider.separator"
     static let alwaysHiddenAutosaveName = "VorssaintMenuBarHider.alwaysHidden"
 
+    /// MenuBarAgent may expose a placeholder NSWindow number. Never convert
+    /// a negative number to the unsigned WindowServer identifier.
+    static func statusWindowID(_ windowNumber: Int) -> CGWindowID? {
+        guard windowNumber > 0 else { return nil }
+        return CGWindowID(exactly: windowNumber)
+    }
+
     static let defaultToggleWidth: Double = 24.0
     static let normalSeparatorWidth: Double = 10.0
     static let normalAlwaysHiddenWidth: Double = 12.0

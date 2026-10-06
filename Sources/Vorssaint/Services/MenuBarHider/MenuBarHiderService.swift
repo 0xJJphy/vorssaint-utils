@@ -220,8 +220,9 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
     private func visibleStatusItemX(_ item: NSStatusItem) -> CGFloat? {
         guard let window = item.button?.window,
-              let info = CGWindowListCreateDescriptionFromArray([NSNumber(value: window.windowNumber)] as CFArray) as? [[String: Any]],
-              let entry = info.first,
+              let windowID = MenuBarHiderSupport.statusWindowID(window.windowNumber),
+              let info = CGWindowListCopyWindowInfo(.optionOnScreenOnly, kCGNullWindowID) as? [[String: Any]],
+              let entry = info.first(where: { ($0[kCGWindowNumber as String] as? NSNumber)?.uint32Value == windowID }),
               entry[kCGWindowIsOnscreen as String] as? Bool == true,
               let bounds = entry[kCGWindowBounds as String] as? [String: Any],
               let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),

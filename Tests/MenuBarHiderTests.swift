@@ -20,6 +20,15 @@ enum MenuBarHiderTests {
         suite.expect(!AppFeature.menuBarHider.isAvailable(in: defaults),
                      "an explicit uninstall survives migration")
 
+        suite.expect(MenuBarHiderSupport.statusWindowID(-1) == nil,
+                     "a placeholder status window cannot trap on unsigned conversion")
+        suite.expect(MenuBarHiderSupport.statusWindowID(0) == nil,
+                     "the null window cannot be queried as a separator")
+        suite.expect(MenuBarHiderSupport.statusWindowID(Int.max) == nil,
+                     "an out-of-range window number is rejected without trapping")
+        suite.expect(MenuBarHiderSupport.statusWindowID(42) == 42,
+                     "valid window identifiers remain queryable")
+
         // MARK: Menu Bar Hider calculations and localization
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(5) == 5, "auto-collapse delay 5 is valid")
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(30) == 30, "auto-collapse delay 30 is valid")
