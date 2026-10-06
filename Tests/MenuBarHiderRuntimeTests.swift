@@ -8,6 +8,7 @@ import AppKit
 enum MenuBarHiderRuntimeTests {
     final class Item {}
     enum NSEvent {
+        static let doubleClickInterval = 0.5
         enum EventMask { case scrollWheel }
         static var registrations = 0
         static func addLocalMonitorForEvents(matching: EventMask,
@@ -45,6 +46,8 @@ enum MenuBarHiderRuntimeTests {
         var autoCollapseTimer: Timer?
         var autoCollapseGeneration: UInt64 = 0
         var recoveryHoldsExpansion = false
+        var lastToggleClickTimestamp: TimeInterval = 0
+        var didRevealInClickSequence = false
         var didExpandFromHover = false
         var toggleItem: Item?
         var separatorItem: Item?
@@ -177,6 +180,18 @@ enum MenuBarHiderRuntimeTests {
         host.syncWithPreferences()
         suite.expect(!host.isCollapsed && host.isShowingAll && host.autoCollapseTimer == nil && host.recoveryHoldsExpansion,
                      "icon recovery reveals even always-hidden controls across preference syncs")
+        let clicks = Host(defaults: defaults)
+        clicks.isEnabled = true
+        clicks.isCollapsed = true
+        clicks.handleToggleClick(clickCount: 1, timestamp: 10, alwaysHiddenEnabled: true)
+        clicks.handleToggleClick(clickCount: 2, timestamp: 10.4, alwaysHiddenEnabled: true)
+        suite.expect(clicks.isShowingAll,
+                     "a system-classified double click slower than 300 ms reveals always-hidden icons")
+        clicks.handleToggleClick(clickCount: 3, timestamp: 10.45, alwaysHiddenEnabled: true)
+        suite.expect(clicks.isShowingAll, "the tail of a reveal gesture cannot hide the recovered controls")
+        clicks.handleToggleClick(clickCount: 1, timestamp: 12, alwaysHiddenEnabled: true)
+        suite.expect(clicks.isCollapsed, "a new single click still closes the revealed groups")
+        clicks.autoCollapseTimer?.invalidate()
         host.autoCollapseIfCurrent(generation: nextGeneration)
         suite.expect(host.isShowingAll && host.recoveryHoldsExpansion,
                      "a stale callback cannot hide the only recovery control again")

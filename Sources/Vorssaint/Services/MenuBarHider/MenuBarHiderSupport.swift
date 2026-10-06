@@ -101,21 +101,9 @@ enum MenuBarHiderSupport {
     /// again, so brushing past on the way somewhere else does not collapse it.
     static let hoverCollapseDelay: Double = 0.8
 
-    /// Upper bound on the gap between the two clicks of a reveal gesture.
-    static let revealGestureCeiling: Double = 0.30
-
-    /// How close together the two clicks of a reveal gesture must land.
-    ///
-    /// Deliberately capped below the system double-click interval. That interval
-    /// is a comfort setting that can sit at a second or more, while this button's
-    /// single click is a toggle people press repeatedly — two deliberate
-    /// collapse/expand presses land well inside it and would otherwise be read
-    /// as one reveal gesture. A real double click is far faster than pressing,
-    /// looking at the result, and pressing again. A system interval shorter than
-    /// the ceiling still wins, since AppKit will not report a second click past
-    /// it anyway.
+    /// Honor the same interval AppKit uses to classify the click sequence.
     static func revealGestureInterval(systemDoubleClickInterval: Double) -> Double {
-        min(max(systemDoubleClickInterval, 0), revealGestureCeiling)
+        max(systemDoubleClickInterval, 0)
     }
 
     /// SF Symbol icon name for the toggle button based on state and style.

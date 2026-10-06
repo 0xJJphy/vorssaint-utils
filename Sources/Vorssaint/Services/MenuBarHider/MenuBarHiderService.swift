@@ -621,27 +621,19 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             return
         }
 
-        // 4. The button sends one action per mouse-up, so a double click cannot
-        //    be told from the first half of one without either holding every
-        //    single click for the double-click interval or letting the second
-        //    click supersede the first. Holding taxes the gesture people make
-        //    constantly, so this acts immediately and escalates instead: no
-        //    click ever waits, and the first click's outcome is a state the
-        //    person asked for rather than a guess that has to be undone.
-        //
-        //    The sequence comes from `clickCount`, which AppKit resets only
-        //    after the interval passes with no further click; timing the pairing
-        //    here instead re-armed it on every click, so a rapid burst escalated
-        //    on every second one. The gap is checked as well, because AppKit
-        //    counts against the system double-click interval and that is far
-        //    wider than the gesture: two deliberate collapse/expand presses fall
-        //    inside it and must stay two toggles, not one reveal.
-        let gap = event.timestamp - lastToggleClickTimestamp
-        lastToggleClickTimestamp = event.timestamp
+        // Apply the first click immediately, then honor AppKit's double-click
+        // classification and the user's configured interval.
+        handleToggleClick(clickCount: event.clickCount, timestamp: event.timestamp,
+                          alwaysHiddenEnabled: alwaysHiddenEnabled)
+    }
+
+    private func handleToggleClick(clickCount: Int, timestamp: TimeInterval, alwaysHiddenEnabled: Bool) {
+        let gap = timestamp - lastToggleClickTimestamp
+        lastToggleClickTimestamp = timestamp
         let withinGesture = gap <= MenuBarHiderSupport.revealGestureInterval(
             systemDoubleClickInterval: NSEvent.doubleClickInterval)
 
-        if event.clickCount <= 1 {
+        if clickCount <= 1 {
             didRevealInClickSequence = false
             performSingleClickToggle()
             return
@@ -649,7 +641,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         // Once a sequence has revealed, further clicks in it are the tail of a
         // gesture already carried out.
         guard !didRevealInClickSequence else { return }
-        if event.clickCount == 2, alwaysHiddenEnabled, !isShowingAll, withinGesture {
+        if clickCount == 2, alwaysHiddenEnabled, !isShowingAll, withinGesture {
             didRevealInClickSequence = true
             showAll()
             return

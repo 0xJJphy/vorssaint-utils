@@ -73,21 +73,12 @@ enum MenuBarHiderTests {
                    "showing-all toggle offers hiding the always-hidden section for \(lang)")
         }
 
-        // The reveal gesture must be tighter than the system double-click
-        // interval, which is a comfort setting that can sit far above the speed
-        // of an actual double click.
-        suite.expect(MenuBarHiderSupport.revealGestureInterval(systemDoubleClickInterval: 0.5)
-                == MenuBarHiderSupport.revealGestureCeiling,
-               "a roomy system interval is capped at the reveal ceiling")
-        suite.expect(MenuBarHiderSupport.revealGestureInterval(systemDoubleClickInterval: 1.2)
-                == MenuBarHiderSupport.revealGestureCeiling,
-               "the slowest system interval is still capped")
-        suite.expect(MenuBarHiderSupport.revealGestureInterval(systemDoubleClickInterval: 0.18) == 0.18,
-               "a system interval below the ceiling wins, since AppKit will not report past it")
+        for interval in [0.18, 0.5, 1.2] {
+            suite.expect(MenuBarHiderSupport.revealGestureInterval(systemDoubleClickInterval: interval) == interval,
+                         "reveal honors the user's system double-click interval")
+        }
         suite.expect(MenuBarHiderSupport.revealGestureInterval(systemDoubleClickInterval: -1) == 0,
-               "a nonsensical system interval cannot produce a negative window")
-        suite.expect(MenuBarHiderSupport.revealGestureCeiling < 0.5,
-               "the ceiling is meaningfully tighter than the macOS default interval")
+                     "negative intervals cannot create a reveal window")
 
         // Every style's symbols must resolve on the running system: a nil image
         // leaves the variable-length toggle with no image and no title, which
