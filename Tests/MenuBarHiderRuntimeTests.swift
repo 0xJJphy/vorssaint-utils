@@ -6,7 +6,7 @@ import AppKit
 /// Exercises production lifecycle methods with isolated preferences and no
 /// status items or global shortcuts installed in the user's session.
 enum MenuBarHiderRuntimeTests {
-    final class Item {}
+    final class Item { var visibleX: CGFloat? }
     enum NSEvent {
         static let doubleClickInterval = 0.5
         enum EventMask { case scrollWheel }
@@ -46,12 +46,21 @@ enum MenuBarHiderRuntimeTests {
         var autoCollapseTimer: Timer?
         var autoCollapseGeneration: UInt64 = 0
         var recoveryHoldsExpansion = false
+        static let swappedRolesKey = "menuBarHiderSeparatorRolesSwapped"
+        var separatorRolesSwapped = false
+        var physicalSeparatorItem: Item?
+        var physicalAlwaysHiddenItem: Item?
+        func setupSeparatorDragMonitor() {}
+        func removeSeparatorDragMonitor() {}
+        func visibleStatusItemX(_ item: Item) -> CGFloat? { item.visibleX }
         var lastToggleClickTimestamp: TimeInterval = 0
         var didRevealInClickSequence = false
+        var pendingClickTimer: Timer?
+        var pendingClickGeneration: UInt64 = 0
         var didExpandFromHover = false
         var toggleItem: Item?
-        var separatorItem: Item?
-        var alwaysHiddenItem: Item?
+        var separatorItem: Item? { separatorRolesSwapped ? physicalAlwaysHiddenItem : physicalSeparatorItem }
+        var alwaysHiddenItem: Item? { separatorRolesSwapped ? physicalSeparatorItem : physicalAlwaysHiddenItem }
         var hoverWatchdogActive = false
         var trackingActive = false
         var scrollMonitor: Any?
@@ -64,8 +73,8 @@ enum MenuBarHiderRuntimeTests {
         func installOrUpdateItems() {
             installs += 1
             toggleItem = toggleItem ?? Item()
-            separatorItem = separatorItem ?? Item()
-            alwaysHiddenItem = alwaysHiddenItem ?? Item()
+            physicalSeparatorItem = physicalSeparatorItem ?? Item()
+            physicalAlwaysHiddenItem = physicalAlwaysHiddenItem ?? Item()
             trackingActive = true
         }
         func handleScrollEvent(_ event: AppKit.NSEvent) {}
@@ -184,13 +193,52 @@ enum MenuBarHiderRuntimeTests {
         clicks.isEnabled = true
         clicks.isCollapsed = true
         clicks.handleToggleClick(clickCount: 1, timestamp: 10, alwaysHiddenEnabled: true)
-        clicks.handleToggleClick(clickCount: 2, timestamp: 10.4, alwaysHiddenEnabled: true)
+        suite.expect(clicks.isCollapsed, "first click keeps the native layout stable for the second click")
+        clicks.handleToggleClick(clickCount: 1, timestamp: 10.4, alwaysHiddenEnabled: true)
         suite.expect(clicks.isShowingAll,
                      "a system-classified double click slower than 300 ms reveals always-hidden icons")
         clicks.handleToggleClick(clickCount: 3, timestamp: 10.45, alwaysHiddenEnabled: true)
         suite.expect(clicks.isShowingAll, "the tail of a reveal gesture cannot hide the recovered controls")
         clicks.handleToggleClick(clickCount: 1, timestamp: 12, alwaysHiddenEnabled: true)
+        clicks.finishPendingClick(generation: clicks.pendingClickGeneration)
         suite.expect(clicks.isCollapsed, "a new single click still closes the revealed groups")
+        clicks.handleToggleClick(clickCount: 1, timestamp: 14, alwaysHiddenEnabled: true)
+        let staleClick = clicks.pendingClickGeneration
+        clicks.revealForStatusItemRecovery()
+        clicks.finishPendingClick(generation: staleClick)
+        suite.expect(clicks.isShowingAll && clicks.pendingClickTimer == nil,
+                     "recovery cancels a queued single click without re-hiding controls")
+        clicks.collapse()
+        clicks.handleToggleClick(clickCount: 1, timestamp: 16, alwaysHiddenEnabled: true)
+        clicks.handleToggleClick(clickCount: 2, timestamp: 16.1, alwaysHiddenEnabled: true)
+        suite.expect(clicks.isShowingAll && clicks.pendingClickTimer == nil,
+                     "AppKit-classified double clicks also resolve without a delayed collapse")
+        clicks.collapse()
+        clicks.handleToggleClick(clickCount: 1, timestamp: 18, alwaysHiddenEnabled: true)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.6))
+        suite.expect(!clicks.isCollapsed && !clicks.isShowingAll && clicks.pendingClickTimer == nil,
+                     "a real one-shot timer performs the single click after the gesture interval")
+        clicks.revealForStatusItemRecovery()
+        clicks.installOrUpdateItems()
+        let leftSlot = clicks.physicalSeparatorItem!
+        let rightSlot = clicks.physicalAlwaysHiddenItem!
+        leftSlot.visibleX = 100
+        rightSlot.visibleX = 120
+        clicks.repairSeparatorOrder()
+        suite.expect(clicks.separatorItem === rightSlot && clicks.alwaysHiddenItem === leftSlot,
+                     "crossed separators exchange roles without exchanging physical identities")
+        clicks.repairSeparatorOrder()
+        suite.expect(clicks.separatorRolesSwapped,
+                     "repeated order repair cannot oscillate between separator roles")
+        rightSlot.visibleX = nil
+        clicks.repairSeparatorOrder()
+        suite.expect(clicks.separatorRolesSwapped,
+                     "missing on-screen geometry cannot reverse the repaired roles")
+        leftSlot.visibleX = 140
+        rightSlot.visibleX = 120
+        clicks.repairSeparatorOrder()
+        suite.expect(!clicks.separatorRolesSwapped && clicks.separatorItem === leftSlot,
+                     "dragging the separators back exchanges their roles again")
         clicks.autoCollapseTimer?.invalidate()
         host.autoCollapseIfCurrent(generation: nextGeneration)
         suite.expect(host.isShowingAll && host.recoveryHoldsExpansion,

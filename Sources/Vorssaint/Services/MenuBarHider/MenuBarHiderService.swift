@@ -18,8 +18,16 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     private var recoveryHoldsExpansion = false
 
     private var toggleItem: NSStatusItem?
-    private var separatorItem: NSStatusItem?
-    private var alwaysHiddenItem: NSStatusItem?
+    private var physicalSeparatorItem: NSStatusItem?
+    private var physicalAlwaysHiddenItem: NSStatusItem?
+    private static let swappedRolesKey = "menuBarHiderSeparatorRolesSwapped"
+    private var separatorRolesSwapped = UserDefaults.standard.bool(forKey: swappedRolesKey)
+    private var separatorItem: NSStatusItem? {
+        separatorRolesSwapped ? physicalAlwaysHiddenItem : physicalSeparatorItem
+    }
+    private var alwaysHiddenItem: NSStatusItem? {
+        separatorRolesSwapped ? physicalSeparatorItem : physicalAlwaysHiddenItem
+    }
 
     private var autoCollapseTimer: Timer?
     private var hoverWatchdogTimer: Timer?
@@ -30,9 +38,13 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     private var trackingArea: NSTrackingArea?
     private weak var trackingButton: NSStatusBarButton?
     private var scrollMonitor: Any?
+    private var separatorDragMonitor: Any?
+    private var localSeparatorDragMonitor: Any?
     private var lastScrollToggleTime: TimeInterval = 0
     private var lastToggleClickTimestamp: TimeInterval = 0
     private var didRevealInClickSequence = false
+    private var pendingClickTimer: Timer?
+    private var pendingClickGeneration: UInt64 = 0
 
     override private init() {
         super.init()
@@ -56,7 +68,9 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         NotificationCenter.default.removeObserver(self)
         autoCollapseTimer?.invalidate()
         hoverWatchdogTimer?.invalidate()
+        pendingClickTimer?.invalidate()
         removeScrollMonitor()
+        removeSeparatorDragMonitor()
     }
 
     // MARK: - Lifecycle & Preferences Sync
@@ -71,6 +85,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         if enabled {
             installOrUpdateItems()
             setupScrollMonitor()
+            setupSeparatorDragMonitor()
             // Arm the idle timer for the state we are actually in. Installing
             // the items does not do it, so a relaunch that restores an expanded
             // bar never collapsed, and switching auto-collapse on only took
@@ -86,6 +101,8 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     func resetSeparatorPositions() {
         guard isEnabled else { return }
         teardown()
+        separatorRolesSwapped = false
+        UserDefaults.standard.removeObject(forKey: Self.swappedRolesKey)
         syncHotkey()
         UserDefaults.standard.removeObject(forKey: "NSStatusItem Preferred Position \(MenuBarHiderSupport.toggleAutosaveName)")
         UserDefaults.standard.removeObject(forKey: "NSStatusItem Preferred Position \(MenuBarHiderSupport.separatorAutosaveName)")
@@ -93,6 +110,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         UserDefaults.standard.synchronize()
         installOrUpdateItems()
         setupScrollMonitor()
+        setupSeparatorDragMonitor()
         beginConfigurationMode()
         triggerHapticFeedback()
     }
@@ -126,27 +144,29 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         }
 
         // 2. Main Separator Item
-        if separatorItem == nil {
+        if physicalSeparatorItem == nil {
             let item = NSStatusBar.system.statusItem(withLength: CGFloat(MenuBarHiderSupport.normalSeparatorWidth))
             item.autosaveName = MenuBarHiderSupport.separatorAutosaveName
             item.behavior = []
             item.isVisible = true
-            separatorItem = item
+            physicalSeparatorItem = item
         }
 
         // 3. Always Hidden Separator Item
         if alwaysHiddenEnabled {
-            if alwaysHiddenItem == nil {
+            if physicalAlwaysHiddenItem == nil {
                 let item = NSStatusBar.system.statusItem(withLength: CGFloat(MenuBarHiderSupport.normalAlwaysHiddenWidth))
                 item.autosaveName = MenuBarHiderSupport.alwaysHiddenAutosaveName
                 item.behavior = []
                 item.isVisible = true
-                alwaysHiddenItem = item
+                physicalAlwaysHiddenItem = item
             }
         } else {
-            if let alwaysHiddenItem {
-                NSStatusBar.system.removeStatusItem(alwaysHiddenItem)
-                self.alwaysHiddenItem = nil
+            separatorRolesSwapped = false
+            UserDefaults.standard.removeObject(forKey: Self.swappedRolesKey)
+            if let physicalAlwaysHiddenItem {
+                NSStatusBar.system.removeStatusItem(physicalAlwaysHiddenItem)
+                self.physicalAlwaysHiddenItem = nil
             }
         }
 
@@ -162,8 +182,54 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         updateItemAppearances()
     }
 
-    // Roles remain attached to their autosave identities. macOS 27 can
-    // report stale window positions, so geometry must never exchange them.
+    private func setupSeparatorDragMonitor() {
+        guard UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderAlwaysHiddenEnabled) else {
+            removeSeparatorDragMonitor()
+            return
+        }
+        guard separatorDragMonitor == nil, localSeparatorDragMonitor == nil else { return }
+        localSeparatorDragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            if event.modifierFlags.contains(.command) {
+                DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
+            }
+            return event
+        }
+        separatorDragMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
+            guard event.modifierFlags.contains(.command) else { return }
+            DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
+        }
+    }
+
+    private func removeSeparatorDragMonitor() {
+        if let separatorDragMonitor { NSEvent.removeMonitor(separatorDragMonitor) }
+        separatorDragMonitor = nil
+        if let localSeparatorDragMonitor { NSEvent.removeMonitor(localSeparatorDragMonitor) }
+        localSeparatorDragMonitor = nil
+    }
+
+    private func repairSeparatorOrder() {
+        guard isEnabled, isShowingAll,
+              let normal = separatorItem, let permanent = alwaysHiddenItem,
+              let normalX = visibleStatusItemX(normal),
+              let permanentX = visibleStatusItemX(permanent), normalX < permanentX else { return }
+        // Exchange semantics, preserving each physical item's autosave identity.
+        separatorRolesSwapped.toggle()
+        UserDefaults.standard.set(separatorRolesSwapped, forKey: Self.swappedRolesKey)
+        updateItemAppearances()
+    }
+
+    private func visibleStatusItemX(_ item: NSStatusItem) -> CGFloat? {
+        guard let window = item.button?.window,
+              let info = CGWindowListCreateDescriptionFromArray([NSNumber(value: window.windowNumber)] as CFArray) as? [[String: Any]],
+              let entry = info.first,
+              entry[kCGWindowIsOnscreen as String] as? Bool == true,
+              let bounds = entry[kCGWindowBounds as String] as? [String: Any],
+              let rect = CGRect(dictionaryRepresentation: bounds as CFDictionary),
+              rect.width > 0 else { return nil }
+        // Window-server bounds, never cached NSWindow.frame coordinates.
+        return rect.midX
+    }
+
 
     private func configureItemButtons() {
         let style = currentIconStyle
@@ -243,6 +309,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     private func teardown() {
+        cancelPendingClick()
         hotkey.unregister()
         shortcutRegistrationFailed = false
         shortcutConflict = nil
@@ -252,17 +319,18 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         didExpandFromHover = false
         removeTrackingArea()
         removeScrollMonitor()
+        removeSeparatorDragMonitor()
         if let toggleItem {
             NSStatusBar.system.removeStatusItem(toggleItem)
             self.toggleItem = nil
         }
-        if let separatorItem {
-            NSStatusBar.system.removeStatusItem(separatorItem)
-            self.separatorItem = nil
+        if let physicalSeparatorItem {
+            NSStatusBar.system.removeStatusItem(physicalSeparatorItem)
+            self.physicalSeparatorItem = nil
         }
-        if let alwaysHiddenItem {
-            NSStatusBar.system.removeStatusItem(alwaysHiddenItem)
-            self.alwaysHiddenItem = nil
+        if let physicalAlwaysHiddenItem {
+            NSStatusBar.system.removeStatusItem(physicalAlwaysHiddenItem)
+            self.physicalAlwaysHiddenItem = nil
         }
         isCollapsed = false
         isShowingAll = false
@@ -289,7 +357,9 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     func expand(startTimer: Bool = true) {
+        cancelPendingClick()
         guard isEnabled else { return }
+        repairSeparatorOrder()
         recoveryHoldsExpansion = false
         stopHoverWatchdog()
         didExpandFromHover = false
@@ -310,8 +380,10 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     func collapse() {
+        cancelPendingClick()
         guard isEnabled else { return }
         recoveryHoldsExpansion = false
+        repairSeparatorOrder()
         let wasExpanded = !isCollapsed || isShowingAll
         stopAutoCollapseTimer()
         stopHoverWatchdog()
@@ -326,6 +398,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     func showAll(startTimer: Bool = true) {
+        cancelPendingClick()
         guard isEnabled else { return }
         recoveryHoldsExpansion = false
         stopHoverWatchdog()
@@ -333,6 +406,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         isCollapsed = false
         isShowingAll = true
         updateItemAppearances()
+        DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
         persistCollapsedState()
         triggerHapticFeedback()
 
@@ -344,6 +418,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     func beginConfigurationMode() {
+        cancelPendingClick()
         guard isEnabled else { return }
         isConfiguring = true
         stopAutoCollapseTimer()
@@ -600,11 +675,14 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
         // 1. Ignore clicks while holding Command (the user is dragging/reordering icons)
         if event.modifierFlags.contains(.command) {
+            cancelPendingClick()
+            DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
             return
         }
 
         // 2. Right-click or Control+Click -> Context Menu
         if event.type == .rightMouseUp || (event.type == .leftMouseUp && event.modifierFlags.contains(.control)) {
+            cancelPendingClick()
             showContextMenu(from: sender)
             return
         }
@@ -621,31 +699,50 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             return
         }
 
-        // Apply the first click immediately, then honor AppKit's double-click
-        // classification and the user's configured interval.
+        // Keep the native item in place until the gesture is resolved.
         handleToggleClick(clickCount: event.clickCount, timestamp: event.timestamp,
                           alwaysHiddenEnabled: alwaysHiddenEnabled)
     }
 
     private func handleToggleClick(clickCount: Int, timestamp: TimeInterval, alwaysHiddenEnabled: Bool) {
+        guard isEnabled else { return }
         let gap = timestamp - lastToggleClickTimestamp
         lastToggleClickTimestamp = timestamp
         let withinGesture = gap <= MenuBarHiderSupport.revealGestureInterval(
             systemDoubleClickInterval: NSEvent.doubleClickInterval)
 
-        if clickCount <= 1 {
-            didRevealInClickSequence = false
-            performSingleClickToggle()
-            return
-        }
-        // Once a sequence has revealed, further clicks in it are the tail of a
-        // gesture already carried out.
-        guard !didRevealInClickSequence else { return }
-        if clickCount == 2, alwaysHiddenEnabled, !isShowingAll, withinGesture {
+        if withinGesture && didRevealInClickSequence { return }
+        // Do not require forwarded clicks to retain AppKit's clickCount.
+        // A pending first click and event timestamps identify the pair.
+        if alwaysHiddenEnabled, withinGesture, gap >= 0, pendingClickTimer != nil {
+            cancelPendingClick()
             didRevealInClickSequence = true
             showAll()
             return
         }
+        cancelPendingClick()
+        didRevealInClickSequence = false
+        guard alwaysHiddenEnabled else {
+            performSingleClickToggle()
+            return
+        }
+        let generation = pendingClickGeneration
+        let timer = Timer(timeInterval: NSEvent.doubleClickInterval, repeats: false) { [weak self] _ in
+            self?.finishPendingClick(generation: generation)
+        }
+        pendingClickTimer = timer
+        RunLoop.main.add(timer, forMode: .common)
+    }
+
+    private func cancelPendingClick() {
+        pendingClickGeneration &+= 1
+        pendingClickTimer?.invalidate()
+        pendingClickTimer = nil
+    }
+
+    private func finishPendingClick(generation: UInt64) {
+        guard generation == pendingClickGeneration, pendingClickTimer != nil, isEnabled else { return }
+        cancelPendingClick()
         performSingleClickToggle()
     }
 
@@ -671,6 +768,8 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             return
         }
         if event.modifierFlags.contains(.command) {
+            cancelPendingClick()
+            DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
             return
         }
         toggle()
@@ -682,6 +781,8 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             return
         }
         if event.modifierFlags.contains(.command) {
+            cancelPendingClick()
+            DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
             return
         }
         toggleAlwaysHiddenSection()
