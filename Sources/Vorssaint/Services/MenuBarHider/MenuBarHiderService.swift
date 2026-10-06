@@ -103,7 +103,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             && UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderShortcutEnabled)
         let shortcut = GlobalShortcut.saved(for: DefaultsKey.menuBarHiderShortcut,
                                             fallback: .menuBarHiderDefault)
-        hotkey.sync(enabled: shortcutEnabled, shortcut: shortcut)
+        hotkey.sync(enabled: shortcutEnabled, shortcut: shortcut, storageKey: DefaultsKey.menuBarHiderShortcut)
     }
 
     private func installOrUpdateItems() {
@@ -825,5 +825,3 @@ final class MenuBarHiderSeparatorView: NSView {
         nil
     }
 }
-
-

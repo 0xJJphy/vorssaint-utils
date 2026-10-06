@@ -234,9 +234,9 @@ struct GlobalShortcut: Equatable, Hashable {
     // layer, matching how the system numbers its own capture keys.
     static let screenRecorderDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_5),
                                                       modifiers: [.control, .option, .command])
-    // H for Hide on the same free control-option-command layer.
+    // Shift distinguishes Hide from the recent-captures shortcut.
     static let menuBarHiderDefault = GlobalShortcut(keyCode: Int64(kVK_ANSI_H),
-                                                    modifiers: [.control, .option, .command])
+                                                    modifiers: [.control, .option, .command, .shift])
 
     static func saved(for key: String, fallback: GlobalShortcut) -> GlobalShortcut {
         if let raw = UserDefaults.standard.string(forKey: key),

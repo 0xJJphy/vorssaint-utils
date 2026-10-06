@@ -1920,6 +1920,7 @@ enum Defaults {
         migrateFanControlVisibility(in: defaults)
         migrateScrollInverterAxes(in: defaults)
         migrateLinearScrollAvailability(in: defaults)
+        migrateMenuBarHiderAvailability(in: defaults)
         migrateWhatsAppDownloadsEnabled(in: defaults)
         migrateBatteryTemperatureVisibility(in: defaults)
         migrateSwitcherPreviewSize(in: defaults)
@@ -2127,6 +2128,14 @@ enum Defaults {
               defaults.object(forKey: DefaultsKey.linearScrollEnabled) as? Bool == true
         else { return }
         defaults.set(true, forKey: AppFeature.linearScroll.availabilityKey)
+    }
+
+    /// Existing development installs keep the hider when they already enabled it.
+    static func migrateMenuBarHiderAvailability(in defaults: UserDefaults) {
+        guard defaults.object(forKey: AppFeature.menuBarHider.availabilityKey) == nil,
+              defaults.object(forKey: DefaultsKey.menuBarHiderEnabled) as? Bool == true
+        else { return }
+        defaults.set(true, forKey: AppFeature.menuBarHider.availabilityKey)
     }
 
     static func migrateFanControlVisibility(in defaults: UserDefaults) {

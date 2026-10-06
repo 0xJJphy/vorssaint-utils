@@ -243,4 +243,3 @@ struct MenuBarHiderSettings: View {
         .foregroundStyle(color)
     }
 }
-

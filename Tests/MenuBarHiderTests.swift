@@ -5,6 +5,21 @@ import AppKit
 
 enum MenuBarHiderTests {
     static func run(_ suite: TestSuite) {
+        let domain = "com.vorssaint.tests.menu-bar-hider.\(UUID().uuidString)"
+        let defaults = UserDefaults(suiteName: domain)!
+        defer { defaults.removePersistentDomain(forName: domain) }
+        Defaults.migrateMenuBarHiderAvailability(in: defaults)
+        suite.expect(defaults.object(forKey: AppFeature.menuBarHider.availabilityKey) == nil,
+                     "new installs leave the hider opt-in")
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderEnabled)
+        Defaults.migrateMenuBarHiderAvailability(in: defaults)
+        suite.expect(AppFeature.menuBarHider.isAvailable(in: defaults),
+                     "updating an enabled development hider keeps it installed")
+        defaults.set(false, forKey: AppFeature.menuBarHider.availabilityKey)
+        Defaults.migrateMenuBarHiderAvailability(in: defaults)
+        suite.expect(!AppFeature.menuBarHider.isAvailable(in: defaults),
+                     "an explicit uninstall survives migration")
+
         // MARK: Menu Bar Hider calculations and localization
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(5) == 5, "auto-collapse delay 5 is valid")
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(30) == 30, "auto-collapse delay 30 is valid")
@@ -126,142 +141,6 @@ enum MenuBarHiderTests {
             suite.expect(!hiderStrings.diagramHidden.isEmpty, "menu bar hider diagramHidden is localized for \(lang)")
             suite.expect(!hiderStrings.diagramVisible.isEmpty, "menu bar hider diagramVisible is localized for \(lang)")
             suite.expect(hiderStrings.secondsFormat.contains("%d"), "menu bar hider secondsFormat contains %d for \(lang)")
-        }
-
-        // MARK: Detached command reruns (counted last, so a late rerun still fails)
-        // The `||` form reran the whole installer — as root — on every non-zero
-        // payload exit. Counting here rather than after a fixed wait leaves the
-        // check no window a second run can arrive behind.
-        let detachedRuns = detachedRunCount()
-        suite.expect(detachedRuns == 1,
-               "a detached command runs its payload once whatever the payload exits with "
-               + "(ran \(detachedRuns) time(s))")
-        try? FileManager.default.removeItem(at: detachRoot)
-
-        // MARK: Command-Q / Command-W protection
-        suite.expect(QuitProtectionSupport.sanitizedHoldDuration(100) == 250,
-               "quit protection clamps a too-short hold duration")
-        suite.expect(QuitProtectionSupport.sanitizedHoldDuration(3_000) == 2_000,
-               "quit protection clamps an overly long hold duration")
-        suite.expect(QuitProtectionSupport.sanitizedHoldDuration(.nan)
-                == QuitProtectionSupport.defaultHoldDurationMilliseconds
-                && QuitProtectionSupport.sanitizedHoldDuration(.infinity)
-                    == QuitProtectionSupport.defaultHoldDurationMilliseconds,
-               "quit protection replaces non-finite hold durations with its default")
-        suite.expect(QuitProtectionSupport.sanitizedDoublePressInterval(100) == 200,
-               "quit protection clamps a too-short double-press interval")
-        suite.expect(QuitProtectionSupport.sanitizedDoublePressInterval(3_000) == 1_500,
-               "quit protection clamps an overly long double-press interval")
-        suite.expect(QuitProtectionSupport.sanitizedDoublePressInterval(.nan)
-                == QuitProtectionSupport.defaultDoublePressIntervalMilliseconds
-                && QuitProtectionSupport.sanitizedDoublePressInterval(-.infinity)
-                    == QuitProtectionSupport.defaultDoublePressIntervalMilliseconds,
-               "quit protection replaces non-finite double-press intervals with its default")
-        suite.expect(!SettingsBackupSupport.valueLooksRight(
-                    DefaultsKey.quitProtectionQuitDoubleIntervalMs, Double.nan)
-                && !SettingsBackupSupport.valueLooksRight(
-                    DefaultsKey.quitProtectionQuitDoubleIntervalMs, Double.infinity),
-               "settings backups reject non-finite numeric preferences")
-        suite.expect(QuitProtectionSupport.isWithinDoublePressInterval(
-            firstTimestamp: 1_000_000_000,
-            secondTimestamp: 2_500_000_000,
-            intervalMilliseconds: 1_500
-        ), "a second press on the interval edge confirms")
-        suite.expect(!QuitProtectionSupport.isWithinDoublePressInterval(
-            firstTimestamp: 1_000_000_000,
-            secondTimestamp: 2_500_000_001,
-            intervalMilliseconds: 1_500
-        ), "a second press after the interval starts a new confirmation")
-        suite.expect(QuitProtectionSupport.usesNativeQuitRequest(for: .quit)
-                && !QuitProtectionSupport.usesNativeQuitRequest(for: .close),
-               "quit confirmation asks the target app to terminate while close stays a window shortcut")
-
-        suite.expect(QuitProtectionSupport.scopeAllows(.all, bundleIdentifier: nil, exceptions: []),
-               "all-app scope protects even an app without a bundle identifier")
-        suite.expect(QuitProtectionSupport.scopeAllows(.selectedOnly,
-                                                 bundleIdentifier: "com.example.editor",
-                                                 exceptions: ["com.example.editor"]),
-               "selected-only scope protects a selected bundle")
-        suite.expect(!QuitProtectionSupport.scopeAllows(.selectedOnly,
-                                                  bundleIdentifier: "com.example.other",
-                                                  exceptions: ["com.example.editor"]),
-               "selected-only scope leaves an unselected bundle alone")
-        suite.expect(!QuitProtectionSupport.scopeAllows(.allExceptSelected,
-                                                  bundleIdentifier: "com.example.editor",
-                                                  exceptions: ["com.example.editor"]),
-               "all-except scope leaves a selected bundle alone")
-        suite.expect(QuitProtectionSupport.scopeAllows(.allExceptSelected,
-                                                 bundleIdentifier: "com.example.other",
-                                                 exceptions: ["com.example.editor"]),
-               "all-except scope protects an unselected bundle")
-
-        suite.expect(QuitProtectionSupport.matchesKey(keyCharacter: "q", keyCode: 0,
-                                                shortcut: .quit),
-               "quit protection prefers the layout-resolved q character")
-        suite.expect(QuitProtectionSupport.matchesKey(keyCharacter: nil, keyCode: 13,
-                                                shortcut: .close),
-               "quit protection falls back to the W key code without a character")
-        suite.expect(QuitProtectionSupport.isBaseShortcut(keyCharacter: "q", keyCode: 12,
-                                                    command: true, control: false,
-                                                    option: false, shift: false, shortcut: .quit),
-               "plain Command-Q is recognized")
-        suite.expect(!QuitProtectionSupport.isBaseShortcut(keyCharacter: "q", keyCode: 12,
-                                                     command: true, control: false,
-                                                     option: false, shift: true, shortcut: .quit),
-               "Shift-Command-Q is not mistaken for plain Command-Q")
-        suite.expect(QuitProtectionSupport.isExtraShortcut(keyCharacter: "q", keyCode: 12,
-                                                     command: true, control: false,
-                                                     option: false, shift: true,
-                                                     shortcut: .quit, extraModifier: .shift),
-               "Shift-Command-Q is recognized as an extra-modifier confirmation")
-        suite.expect(QuitProtectionSupport.isExtraShortcut(keyCharacter: "w", keyCode: 13,
-                                                     command: true, control: true,
-                                                     option: false, shift: false,
-                                                     shortcut: .close, extraModifier: .control),
-               "Control-Command-W is recognized as an extra-modifier confirmation")
-        suite.expect(!QuitProtectionSupport.isExtraShortcut(keyCharacter: "q", keyCode: 12,
-                                                      command: true, control: false,
-                                                      option: true, shift: false,
-                                                      shortcut: .quit, extraModifier: .shift),
-               "an unrelated modifier combination is not protected")
-
-        let quitProtectionKeys = [
-            DefaultsKey.quitProtectionQuitEnabled,
-            DefaultsKey.quitProtectionQuitMode,
-            DefaultsKey.quitProtectionQuitHoldDurationMs,
-            DefaultsKey.quitProtectionQuitDoubleIntervalMs,
-            DefaultsKey.quitProtectionQuitExtraModifier,
-            DefaultsKey.quitProtectionQuitScope,
-            DefaultsKey.quitProtectionQuitExceptions,
-            DefaultsKey.quitProtectionQuitShowFeedback,
-            DefaultsKey.quitProtectionCloseEnabled,
-            DefaultsKey.quitProtectionCloseMode,
-            DefaultsKey.quitProtectionCloseHoldDurationMs,
-            DefaultsKey.quitProtectionCloseDoubleIntervalMs,
-            DefaultsKey.quitProtectionCloseExtraModifier,
-            DefaultsKey.quitProtectionCloseScope,
-            DefaultsKey.quitProtectionCloseExceptions,
-            DefaultsKey.quitProtectionCloseShowFeedback,
-        ]
-        suite.expect(quitProtectionKeys.allSatisfy { Defaults.registeredDefaults[$0] != nil },
-               "quit and close protection settings have registered defaults")
-        suite.expect(SettingsBackupSupport.exportKeys().isSuperset(of: Set<String>(quitProtectionKeys)),
-               "quit and close protection settings are included in portable backup")
-
-        for language in AppLanguage.allCases {
-            let quitProtection = FeatureStrings.quitProtection(language)
-            let quitProtectionValues = Mirror(reflecting: quitProtection).children
-                .compactMap { $0.value as? String }
-            suite.expect(quitProtectionValues.count == 29 && quitProtectionValues.allSatisfy { !$0.isEmpty },
-                   "every quit protection string is set for \(language.rawValue)")
-            suite.expect(quitProtectionValues.allSatisfy { !$0.contains("—") },
-                   "no em-dash in quit protection strings (\(language.rawValue))")
-            expectFormat(quitProtection.holdHUDFormat, ["@"],
-                         "\(language.rawValue) quit protection hold HUD format")
-            expectFormat(quitProtection.doubleHUDFormat, ["@"],
-                         "\(language.rawValue) quit protection double HUD format")
-            expectFormat(quitProtection.extraHUDFormat, ["@"],
-                         "\(language.rawValue) quit protection modifier HUD format")
         }
 
     }

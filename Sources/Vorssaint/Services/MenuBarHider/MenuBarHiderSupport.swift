@@ -143,6 +143,3 @@ enum MenuBarHiderSupport {
         positions.sorted { $0.x < $1.x }.map(\.role)
     }
 }
-
-
-
