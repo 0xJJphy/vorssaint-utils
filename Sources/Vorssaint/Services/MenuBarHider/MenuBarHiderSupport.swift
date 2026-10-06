@@ -57,6 +57,14 @@ enum MenuBarHiderSupport {
         return normalPosition > permanentPosition
     }
 
+    /// Remembered placement of the three hider items. Any app preference write
+    /// posts the same notification, so only a change here is worth measuring.
+    static func placementSnapshot(in defaults: UserDefaults) -> [Double?] {
+        [toggleAutosaveName, separatorAutosaveName, alwaysHiddenAutosaveName].map {
+            (defaults.object(forKey: "NSStatusItem Preferred Position \($0)") as? NSNumber)?.doubleValue
+        }
+    }
+
     static let defaultToggleWidth: Double = 24.0
     static let normalSeparatorWidth: Double = 10.0
     static let normalAlwaysHiddenWidth: Double = 12.0

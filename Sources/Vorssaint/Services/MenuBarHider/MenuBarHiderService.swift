@@ -2,6 +2,7 @@
 // Copyright (C) 2026 Vorssaint
 
 import AppKit
+import ApplicationServices
 import Combine
 import Foundation
 
@@ -40,6 +41,10 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     private var scrollMonitor: Any?
     private var separatorDragMonitor: Any?
     private var localSeparatorDragMonitor: Any?
+    private var separatorMeasurementPending = false
+    private var separatorMeasurementGeneration: UInt64 = 0
+    private var separatorMeasurementRequested = false
+    private var lastObservedPlacement: [Double?]?
     private var lastScrollToggleTime: TimeInterval = 0
     private var lastToggleClickTimestamp: TimeInterval = 0
     private var didRevealInClickSequence = false
@@ -215,26 +220,90 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     @objc private func statusItemPlacementChanged() {
         // Preference notifications may arrive outside the main thread. Do not
         // touch AppKit there, and do not install an idle polling timer.
-        DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            // Every preference write in the app lands here, including timers
+            // that persist state. Measure only when hider placement moved.
+            let placement = MenuBarHiderSupport.placementSnapshot(in: UserDefaults.standard)
+            guard placement != self.lastObservedPlacement else { return }
+            self.lastObservedPlacement = placement
+            self.repairSeparatorOrder()
+        }
     }
 
     private func repairSeparatorOrder() {
         guard isEnabled, physicalSeparatorItem != nil, physicalAlwaysHiddenItem != nil else { return }
+        // Saved positions can be stale on MenuBarAgent systems. Read the
+        // rendered controls first instead of treating remembered placement as
+        // proof that their current order is correct.
+        if requestRenderedSeparatorOrder() { return }
+        applyFallbackSeparatorOrder()
+    }
+
+    /// Without rendered geometry: remembered placement, then the status
+    /// windows, which are only reliable while every section is on screen.
+    private func applyFallbackSeparatorOrder() {
         if let swapped = MenuBarHiderSupport.preferredSeparatorRolesSwapped(in: UserDefaults.standard) {
-            guard swapped != separatorRolesSwapped else { return }
-            separatorRolesSwapped = swapped
-            UserDefaults.standard.set(swapped, forKey: Self.swappedRolesKey)
-            updateItemAppearances()
+            applySeparatorOrder(swapped: swapped)
             return
         }
-        guard isShowingAll,
-              let normal = separatorItem, let permanent = alwaysHiddenItem,
+        guard isShowingAll, let normal = physicalSeparatorItem, let permanent = physicalAlwaysHiddenItem,
               let normalX = visibleStatusItemX(normal),
-              let permanentX = visibleStatusItemX(permanent), normalX < permanentX else { return }
-        // Exchange semantics, preserving each physical item's autosave identity.
-        separatorRolesSwapped.toggle()
-        UserDefaults.standard.set(separatorRolesSwapped, forKey: Self.swappedRolesKey)
+              let permanentX = visibleStatusItemX(permanent) else { return }
+        applySeparatorOrder(swapped: normalX < permanentX)
+    }
+
+    private func applySeparatorOrder(swapped: Bool) {
+        guard isEnabled, physicalSeparatorItem != nil, physicalAlwaysHiddenItem != nil,
+              swapped != separatorRolesSwapped else { return }
+        separatorRolesSwapped = swapped
+        UserDefaults.standard.set(swapped, forKey: Self.swappedRolesKey)
         updateItemAppearances()
+    }
+
+    private func requestRenderedSeparatorOrder() -> Bool {
+        if separatorMeasurementPending {
+            // A drag can land while the previous read is in flight. Read again
+            // afterwards rather than trusting geometry from before the drop.
+            separatorMeasurementRequested = true
+            return true
+        }
+        #if VORSSAINT_DEVELOPMENT
+        NSLog("MenuBarHider geometry trusted=%@ normal=%@ permanent=%@",
+              AXIsProcessTrusted() ? "yes" : "no",
+              String(describing: physicalSeparatorItem?.button?.accessibilityFrame()),
+              String(describing: physicalAlwaysHiddenItem?.button?.accessibilityFrame()))
+        #endif
+        guard AXIsProcessTrusted(),
+              let pid = NSRunningApplication.runningApplications(withBundleIdentifier: "com.apple.MenuBarAgent").first?.processIdentifier,
+              let normalHelp = physicalSeparatorItem?.button?.toolTip,
+              let permanentHelp = physicalAlwaysHiddenItem?.button?.toolTip else { return false }
+        separatorMeasurementPending = true
+        separatorMeasurementRequested = false
+        let generation = separatorMeasurementGeneration
+        let observedRoles = separatorRolesSwapped
+        DispatchQueue.global(qos: .utility).async { [weak self] in
+            let positions = MenuBarHiderAccessibility.separatorPositions(
+                pid: pid, normalHelp: normalHelp, permanentHelp: permanentHelp)
+            DispatchQueue.main.async { [weak self] in
+                guard let self, generation == self.separatorMeasurementGeneration else { return }
+                self.separatorMeasurementPending = false
+                if self.separatorMeasurementRequested {
+                    self.repairSeparatorOrder()
+                    return
+                }
+                guard observedRoles == self.separatorRolesSwapped else { return }
+                #if VORSSAINT_DEVELOPMENT
+                NSLog("MenuBarHider geometry measured=%@", String(describing: positions))
+                #endif
+                if let positions {
+                    self.applySeparatorOrder(swapped: positions.normal < positions.permanent)
+                } else {
+                    self.applyFallbackSeparatorOrder()
+                }
+            }
+        }
+        return true
     }
 
     private func visibleStatusItemX(_ item: NSStatusItem) -> CGFloat? {
@@ -258,7 +327,6 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
         // 1. Toggle button (Always on the right)
         if let toggleButton = toggleItem?.button {
-            toggleButton.subviews.removeAll(where: { $0 is MenuBarHiderSeparatorView })
             toggleButton.target = self
             toggleButton.action = #selector(toggleClicked)
             toggleButton.sendAction(on: [.leftMouseUp, .rightMouseUp])
@@ -293,18 +361,10 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             separatorButton.action = #selector(separatorClicked)
             separatorButton.sendAction(on: [.leftMouseUp])
             separatorButton.image = nil
-            separatorButton.title = ""
+            separatorButton.title = "|"
+            separatorButton.alignment = .right
+            separatorButton.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .regular)
             separatorButton.toolTip = strings.tooltipSeparator
-
-            var drawView = separatorButton.subviews.first(where: { $0 is MenuBarHiderSeparatorView }) as? MenuBarHiderSeparatorView
-            if drawView == nil {
-                let v = MenuBarHiderSeparatorView(frame: separatorButton.bounds)
-                separatorButton.addSubview(v)
-                drawView = v
-            }
-            drawView?.symbol = "|"
-            drawView?.isBold = false
-            drawView?.isVisibleGlyph = true
         }
 
         // 3. Always hidden separator (Leftmost)
@@ -313,23 +373,17 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
             alwaysHiddenButton.action = #selector(alwaysHiddenClicked)
             alwaysHiddenButton.sendAction(on: [.leftMouseUp])
             alwaysHiddenButton.image = nil
-            alwaysHiddenButton.title = ""
+            alwaysHiddenButton.title = "‖"
+            alwaysHiddenButton.alignment = .right
+            alwaysHiddenButton.font = NSFont.monospacedSystemFont(ofSize: 13, weight: .bold)
             alwaysHiddenButton.toolTip = strings.tooltipAlwaysHidden
-
-            var drawView = alwaysHiddenButton.subviews.first(where: { $0 is MenuBarHiderSeparatorView }) as? MenuBarHiderSeparatorView
-            if drawView == nil {
-                let v = MenuBarHiderSeparatorView(frame: alwaysHiddenButton.bounds)
-                alwaysHiddenButton.addSubview(v)
-                drawView = v
-            }
-            drawView?.symbol = "‖"
-            drawView?.isBold = true
-            drawView?.isVisibleGlyph = true
         }
     }
 
     private func teardown() {
         cancelPendingClick()
+        separatorMeasurementGeneration &+= 1
+        separatorMeasurementPending = false
         hotkey.unregister()
         shortcutRegistrationFailed = false
         shortcutConflict = nil
@@ -886,53 +940,5 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         autoCollapseGeneration &+= 1
         autoCollapseTimer?.invalidate()
         autoCollapseTimer = nil
-    }
-}
-
-/// Draws "|" or "‖" at the trailing edge of the separator's local bounds.
-/// Whether the item is on screen depends on the system's menu bar layout.
-final class MenuBarHiderSeparatorView: NSView {
-    var symbol: String = "|" {
-        didSet { if oldValue != symbol { needsDisplay = true } }
-    }
-    var isBold: Bool = false {
-        didSet { if oldValue != isBold { needsDisplay = true } }
-    }
-    var isVisibleGlyph: Bool = true {
-        didSet { if oldValue != isVisibleGlyph { needsDisplay = true } }
-    }
-
-    override init(frame: NSRect) {
-        super.init(frame: frame)
-        self.autoresizingMask = [.width, .height]
-    }
-
-    required init?(coder: NSCoder) {
-        super.init(coder: coder)
-        self.autoresizingMask = [.width, .height]
-    }
-
-    override func draw(_ dirtyRect: NSRect) {
-        super.draw(dirtyRect)
-        guard isVisibleGlyph else { return }
-
-        let font = NSFont.monospacedSystemFont(ofSize: 13, weight: isBold ? .bold : .regular)
-        let text = symbol as NSString
-        let attrs: [NSAttributedString.Key: Any] = [
-            .font: font,
-            .foregroundColor: NSColor.controlTextColor.withAlphaComponent(0.85)
-        ]
-        let size = text.size(withAttributes: attrs)
-        let rect = NSRect(
-            x: bounds.maxX - size.width - 2,
-            y: (bounds.height - size.height) / 2,
-            width: size.width,
-            height: size.height
-        )
-        text.draw(in: rect, withAttributes: attrs)
-    }
-
-    override func hitTest(_ point: NSPoint) -> NSView? {
-        nil
     }
 }

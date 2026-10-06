@@ -50,6 +50,9 @@ enum MenuBarHiderRuntimeTests {
         var separatorRolesSwapped = false
         var physicalSeparatorItem: Item?
         var physicalAlwaysHiddenItem: Item?
+        var separatorMeasurementGeneration: UInt64 = 0
+        var separatorMeasurementPending = false
+        func requestRenderedSeparatorOrder() -> Bool { false }
         func setupSeparatorDragMonitor() {}
         func removeSeparatorDragMonitor() {}
         func visibleStatusItemX(_ item: Item) -> CGFloat? { item.visibleX }

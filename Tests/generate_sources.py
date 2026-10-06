@@ -71,7 +71,7 @@ def main():
                         "    func syncWithPreferences()", "    func resetSeparatorPositions()",
                         "    private func syncHotkey()", "    private func teardown()", "    private func setupScrollMonitor()",
                         "    func toggle()", "    func expand(", "    func collapse()", "    func showAll(",
-                        "    private func repairSeparatorOrder()", "    private func cancelPendingClick()", "    private func finishPendingClick(",
+                        "    private func applySeparatorOrder(", "    private func repairSeparatorOrder()", "    private func applyFallbackSeparatorOrder(", "    private func cancelPendingClick()", "    private func finishPendingClick(",
                         "    private func handleToggleClick(", "    private func performSingleClickToggle()",
                         "    func beginConfigurationMode()", "    func endConfigurationMode()",
                         "    func revealForStatusItemRecovery()", "    private func persistCollapsedState()",
