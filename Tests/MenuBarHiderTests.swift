@@ -49,6 +49,15 @@ enum MenuBarHiderTests {
         defaults.removeObject(forKey: normalPositionKey)
         defaults.removeObject(forKey: permanentPositionKey)
 
+        let resting = CGRect(x: 900, y: 0, width: 10, height: 24)
+        let crossed = CGRect(x: 1000, y: 0, width: 12, height: 24)
+        suite.expect(MenuBarHiderSupport.renderedSeparatorRolesSwapped(normal: resting, permanent: crossed) == true,
+                     "resting separators crossed by a drag swap their roles")
+        // An expanded separator relocated past the notch reads as crossed.
+        let relocated = CGRect(x: 1020, y: 0, width: 798, height: 24)
+        suite.expect(MenuBarHiderSupport.renderedSeparatorRolesSwapped(normal: resting, permanent: relocated) == nil,
+                     "an expanded separator cannot swap roles and start a flicker loop")
+
         // MARK: Menu Bar Hider calculations and localization
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(5) == 5, "auto-collapse delay 5 is valid")
         suite.expect(MenuBarHiderSupport.sanitizeAutoCollapseDelay(30) == 30, "auto-collapse delay 30 is valid")

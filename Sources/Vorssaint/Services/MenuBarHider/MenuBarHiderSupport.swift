@@ -65,6 +65,20 @@ enum MenuBarHiderSupport {
         }
     }
 
+    /// Rendered order of the two separators, or nil when it cannot be trusted.
+    /// An expanded separator is wider than the room beside the notch, so the
+    /// system relocates it (past the camera, or into the overflow on macOS 27)
+    /// and its frame no longer reflects the order. Swapping roles on that
+    /// reading widens the other separator, which moves in turn: a feedback
+    /// loop that flickers the menu bar. Only two separators at their resting
+    /// width say which one the user placed first.
+    static func renderedSeparatorRolesSwapped(normal: CGRect, permanent: CGRect) -> Bool? {
+        let restingLimit = 2 * max(normalSeparatorWidth, normalAlwaysHiddenWidth)
+        guard normal.width <= restingLimit, permanent.width <= restingLimit,
+              normal.midX != permanent.midX else { return nil }
+        return normal.midX < permanent.midX
+    }
+
     static let defaultToggleWidth: Double = 24.0
     static let normalSeparatorWidth: Double = 10.0
     static let normalAlwaysHiddenWidth: Double = 12.0

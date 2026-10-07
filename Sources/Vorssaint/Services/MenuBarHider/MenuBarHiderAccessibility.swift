@@ -8,14 +8,14 @@ import Foundation
 /// NSWindows. Never requests permission, reads menu contents or sends input.
 enum MenuBarHiderAccessibility {
     static func separatorPositions(pid: pid_t, normalHelp: String,
-                                   permanentHelp: String) -> (normal: CGFloat, permanent: CGFloat)? {
+                                   permanentHelp: String) -> (normal: CGRect, permanent: CGRect)? {
         let app = AXUIElementCreateApplication(pid)
         AXUIElementSetMessagingTimeout(app, 0.03)
         let deadline = Date().addingTimeInterval(0.25)
         var pending: [AXUIElement] = [app]
         var visited = 0
-        var normal: CGFloat?
-        var permanent: CGFloat?
+        var normal: CGRect?
+        var permanent: CGRect?
         while !pending.isEmpty, visited < 160, Date() < deadline {
             let element = pending.removeLast()
             // The timeout is per element; children otherwise wait seconds.
@@ -24,9 +24,9 @@ enum MenuBarHiderAccessibility {
             let labels = [kAXHelpAttribute, kAXDescriptionAttribute, kAXTitleAttribute]
                 .compactMap { value(element, $0) as? String }
             if labels.contains(normalHelp) || labels.contains(permanentHelp),
-               let x = positionX(element) {
-                if labels.contains(normalHelp) { normal = x }
-                if labels.contains(permanentHelp) { permanent = x }
+               let frame = frame(element) {
+                if labels.contains(normalHelp) { normal = frame }
+                if labels.contains(permanentHelp) { permanent = frame }
                 if let normal, let permanent, normal != permanent { return (normal, permanent) }
             }
             if let children = value(element, kAXChildrenAttribute) as? [AXUIElement] {
@@ -45,7 +45,7 @@ enum MenuBarHiderAccessibility {
         return result
     }
 
-    private static func positionX(_ element: AXUIElement) -> CGFloat? {
+    private static func frame(_ element: AXUIElement) -> CGRect? {
         guard let raw = value(element, kAXPositionAttribute), CFGetTypeID(raw) == AXValueGetTypeID(),
               let sizeRaw = value(element, kAXSizeAttribute), CFGetTypeID(sizeRaw) == AXValueGetTypeID() else { return nil }
         let position = unsafeBitCast(raw, to: AXValue.self)
@@ -54,6 +54,6 @@ enum MenuBarHiderAccessibility {
         var dimensions = CGSize.zero
         guard AXValueGetValue(position, .cgPoint, &point), AXValueGetValue(size, .cgSize, &dimensions),
               point.x.isFinite, point.y.isFinite, dimensions.width > 0, dimensions.height > 0 else { return nil }
-        return point.x + dimensions.width / 2
+        return CGRect(origin: point, size: dimensions)
     }
 }

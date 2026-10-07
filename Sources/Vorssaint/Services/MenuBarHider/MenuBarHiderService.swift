@@ -297,7 +297,12 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
                 NSLog("MenuBarHider geometry measured=%@", String(describing: positions))
                 #endif
                 if let positions {
-                    self.applySeparatorOrder(swapped: positions.normal < positions.permanent)
+                    // Found but expanded: leave the roles alone rather than
+                    // guess, or the next layout pass would undo this one.
+                    if let swapped = MenuBarHiderSupport.renderedSeparatorRolesSwapped(
+                        normal: positions.normal, permanent: positions.permanent) {
+                        self.applySeparatorOrder(swapped: swapped)
+                    }
                 } else {
                     self.applyFallbackSeparatorOrder()
                 }
