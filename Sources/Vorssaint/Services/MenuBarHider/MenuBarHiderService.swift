@@ -41,6 +41,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     private var scrollMonitor: Any?
     private var separatorDragMonitor: Any?
     private var localSeparatorDragMonitor: Any?
+    private var isReorderingItems = false
     private var separatorMeasurementPending = false
     private var separatorMeasurementGeneration: UInt64 = 0
     private var separatorMeasurementRequested = false
@@ -193,20 +194,49 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     }
 
     private func setupSeparatorDragMonitor() {
-        guard UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderAlwaysHiddenEnabled) else {
+        guard isEnabled else {
             removeSeparatorDragMonitor()
             return
         }
         guard separatorDragMonitor == nil, localSeparatorDragMonitor == nil else { return }
-        localSeparatorDragMonitor = NSEvent.addLocalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
-            if event.modifierFlags.contains(.command) {
-                DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
-            }
+        let mask: NSEvent.EventTypeMask = [.flagsChanged, .mouseMoved, .leftMouseUp]
+        localSeparatorDragMonitor = NSEvent.addLocalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleReorderingEvent(event)
             return event
         }
-        separatorDragMonitor = NSEvent.addGlobalMonitorForEvents(matching: .leftMouseUp) { [weak self] event in
-            guard event.modifierFlags.contains(.command) else { return }
+        separatorDragMonitor = NSEvent.addGlobalMonitorForEvents(matching: mask) { [weak self] event in
+            self?.handleReorderingEvent(event)
+        }
+    }
+
+    private func handleReorderingEvent(_ event: NSEvent) {
+        let commandHeld = event.modifierFlags.contains(.command)
+        let onMenuBar = MenuBarHiderSupport.pointerIsOnMenuBar(
+            NSEvent.mouseLocation, screenFrames: NSScreen.screens.map(\.frame),
+            barHeight: NSStatusBar.system.thickness)
+        // Compact before mouse-down, never resize the item under an active drag.
+        // Once started, keep this layout until Command is released.
+        setReorderingItems(commandHeld && (onMenuBar || isReorderingItems))
+        if event.type == .leftMouseUp, commandHeld {
             DispatchQueue.main.async { [weak self] in self?.repairSeparatorOrder() }
+        }
+    }
+
+    private func setReorderingItems(_ active: Bool) {
+        guard isEnabled, active != isReorderingItems else { return }
+        isReorderingItems = active
+        if active {
+            cancelPendingClick()
+            stopAutoCollapseTimer()
+            stopHoverWatchdog()
+        }
+        updateItemAppearances()
+        if !active {
+            repairSeparatorOrder()
+            if !isConfiguring {
+                restartAutoCollapseTimerIfNeeded()
+                if didExpandFromHover && !isCollapsed { startHoverWatchdog() }
+            }
         }
     }
 
@@ -215,6 +245,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
         separatorDragMonitor = nil
         if let localSeparatorDragMonitor { NSEvent.removeMonitor(localSeparatorDragMonitor) }
         localSeparatorDragMonitor = nil
+        isReorderingItems = false
     }
 
     @objc private func statusItemPlacementChanged() {
@@ -561,7 +592,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
     private func updateItemAppearances() {
         configureItemButtons()
 
-        let state = currentDisplayState
+        let state: MenuBarHiderSupport.DisplayState = isReorderingItems ? .showAll : currentDisplayState
         let width = usableMenuBarWidth
         let alwaysHiddenEnabled = UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderAlwaysHiddenEnabled)
 
@@ -916,7 +947,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
     private func restartAutoCollapseTimerIfNeeded() {
         stopAutoCollapseTimer()
-        guard isEnabled, !isCollapsed, !isConfiguring, !recoveryHoldsExpansion else { return }
+        guard isEnabled, !isCollapsed, !isConfiguring, !recoveryHoldsExpansion, !isReorderingItems else { return }
 
         let autoCollapse = UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderAutoCollapse)
         guard autoCollapse else { return }
@@ -935,7 +966,7 @@ final class MenuBarHiderService: NSResponder, ObservableObject {
 
     private func autoCollapseIfCurrent(generation: UInt64) {
         guard generation == autoCollapseGeneration, isEnabled, !isConfiguring,
-              !isCollapsed, !recoveryHoldsExpansion,
+              !isCollapsed, !recoveryHoldsExpansion, !isReorderingItems,
               UserDefaults.standard.bool(forKey: DefaultsKey.menuBarHiderAutoCollapse)
         else { return }
         collapse()

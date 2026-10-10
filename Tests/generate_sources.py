@@ -87,7 +87,7 @@ def main():
                         "    func beginConfigurationMode()", "    func endConfigurationMode()",
                         "    func revealForStatusItemRecovery()", "    private func persistCollapsedState()",
                         "    private func restartAutoCollapseTimerIfNeeded()", "    private func autoCollapseIfCurrent(",
-                        "    private func stopAutoCollapseTimer()"])
+                        "    private func stopAutoCollapseTimer()", "    private func setReorderingItems(_"])
           + "}\n}\n")
     general = "Sources/Vorssaint/UI/Settings/GeneralSettings.swift"
     write("LaunchAtLoginSettings.swift", "import Foundation\n"

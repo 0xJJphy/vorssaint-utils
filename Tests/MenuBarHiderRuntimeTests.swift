@@ -41,6 +41,7 @@ enum MenuBarHiderRuntimeTests {
         var isCollapsed = false
         var isShowingAll = false
         var isConfiguring = false
+        var isReorderingItems = false
         var shortcutRegistrationFailed = false
         var shortcutConflict: GlobalShortcutRole?
         var autoCollapseTimer: Timer?
@@ -82,6 +83,7 @@ enum MenuBarHiderRuntimeTests {
         }
         func handleScrollEvent(_ event: AppKit.NSEvent) {}
         func stopHoverWatchdog() { hoverWatchdogActive = false }
+        func startHoverWatchdog() { hoverWatchdogActive = true }
         func removeTrackingArea() { trackingActive = false }
         func removeScrollMonitor() { scrollMonitor = nil }
         func updateItemAppearances() { appearances += 1 }
@@ -286,6 +288,33 @@ enum MenuBarHiderRuntimeTests {
         host.autoCollapseIfCurrent(generation: pendingGeneration)
         suite.expect(!host.isEnabled && !host.isCollapsed,
                      "an expired callback has no effect after disabling")
+
+        defaults.set(true, forKey: DefaultsKey.menuBarHiderEnabled)
+        host.syncWithPreferences()
+        host.collapse()
+        let savedCollapsed = defaults.bool(forKey: DefaultsKey.menuBarHiderCollapsed)
+        host.setReorderingItems(true)
+        suite.expect(host.isReorderingItems && host.isCollapsed && !host.isShowingAll,
+                     "Command reordering temporarily reveals without changing collapse state")
+        suite.expect(host.autoCollapseTimer == nil && !host.hoverWatchdogActive,
+                     "reordering stops collapse timers so the drop targets stay stable")
+        host.syncWithPreferences()
+        suite.expect(host.isReorderingItems && host.autoCollapseTimer == nil,
+                     "preference sync cannot resume collapse during reordering")
+        host.setReorderingItems(false)
+        suite.expect(!host.isReorderingItems && host.isCollapsed &&
+                     defaults.bool(forKey: DefaultsKey.menuBarHiderCollapsed) == savedCollapsed,
+                     "releasing Command restores the original hidden state without saving a reveal")
+        host.expand()
+        host.setReorderingItems(true)
+        host.didExpandFromHover = true
+        let dragGeneration = host.autoCollapseGeneration
+        host.autoCollapseIfCurrent(generation: dragGeneration)
+        suite.expect(!host.isCollapsed && host.isReorderingItems,
+                     "a collapse callback cannot close the bar during reordering")
+        host.setReorderingItems(false)
+        suite.expect(!host.isCollapsed && host.autoCollapseTimer != nil && host.hoverWatchdogActive,
+                     "an expanded bar resumes automatic and hover collapse after reordering")
 
         let role = GlobalShortcutRole.menuBarHider
         suite.expect(role.requiredEnableKeys.contains(DefaultsKey.menuBarHiderEnabled),
